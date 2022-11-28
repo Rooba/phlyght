@@ -1,10 +1,33 @@
-__all__ = ("Room", "Light", "Scene")
-
 from typing import Any, Literal, Optional, Generic, TypeVar
 from uuid import UUID
-from pydantic import BaseModel, Field
 from dataclasses import dataclass
 from enum import Enum, auto
+
+from pydantic import BaseModel, Field
+
+__all__ = (
+    "Archetype",
+    "Room",
+    "Light",
+    "Scene",
+    "Zone",
+    "BridgeHome",
+    "GroupedLight",
+    "Device",
+    "Bridge",
+    "DevicePower",
+    "ZigbeeConnectivity",
+    "ZGPConnectivity",
+    "Motion",
+    "Temperature",
+    "LightLevel",
+    "Button",
+    "BehaviorScript",
+    "BehaviorInstance",
+    "GeofenceClient",
+    "Geolocation",
+    "EntertainmentConfiguration",
+)
 
 _T = TypeVar("_T")
 
@@ -55,70 +78,65 @@ class Archetype(Enum):
     HUE_SIGNE = auto()
 
 
-class _id_v1(str):
-    def __get__(self, instance, owner):
-        return Field(..., regex=r"^(\/[a-z]{4,32}\/[0-9a-zA-Z-]{1,32})?$)")
-
-
 @dataclass
-class Dimming:
+class _Dimming:
     brightness: float
     min_dim_level: Optional[float] = Field(0, repr=False)
 
 
 @dataclass
-class XY:
+class _XY:
     x: float
     y: float
 
 
 @dataclass
-class On:
+class _On:
     on: bool = Field(..., alias="on")
 
 
 @dataclass
-class ColorPoint:
-    xy: XY
+class _ColorPoint:
+    xy: _XY
 
 
 @dataclass(frozen=True)
-class Identifier:
+class _Identifier:
     rid: str
     rtype: str
 
 
 @dataclass(frozen=True)
-class Metadata:
+class _Metadata:
     name: str
     archetype: Optional[Archetype] = Archetype.UNKNOWN_ARCHETYPE
-    image: Optional[Identifier] = Field(None, repr=False)
+    image: Optional[_Identifier] = Field(None, repr=False)
 
 
-class HueGroupedMeta(type):
+class _HueGroupedMeta(type):
     def update(cls):
         for v in cls.__dict__.values():
             if hasattr(v, "update_forward_refs"):
                 v.update_forward_refs()
 
 
-class HueGrouped(metaclass=HueGroupedMeta):
+class _HueGrouped(metaclass=_HueGroupedMeta):
     ...
 
 
-class _Lights(HueGrouped):
+class _Lights(_HueGrouped):
     class ColorTemperature(BaseModel):
         mirek: Optional[int]
         mirek_valid: bool
         mirek_schema: dict[str, float]
 
     class Gamut(BaseModel):
-        red: XY
-        green: XY
-        blue: XY
+        red: _XY
+        green: _XY
+        blue: _XY
 
     class Color(BaseModel):
-        xy: XY
+        xy: _XY
         gamut: "_Lights.Gamut"
         gamut_type: Literal["A"] | Literal["B"] | Literal["C"]
 
@@ -129,7 +147,7 @@ class _Lights(HueGrouped):
         speed_valid: bool
 
     class Gradient(BaseModel):
-        points: list[ColorPoint]
+        points: list[_ColorPoint]
         points_capable: int
 
     class Effects(BaseModel):
@@ -148,10 +166,10 @@ class _Lights(HueGrouped):
     class Light(Generic[_T], BaseModel):
         id: UUID
         id_v1: str = Field(..., regex=r"^(\/[a-z]{4,32}\/[0-9a-zA-Z-]{1,32})?$")
-        owner: Identifier
-        metadata: Metadata
-        on: On = Field(repr=False)
-        dimming: Dimming
+        owner: _Identifier
+        metadata: _Metadata
+        on: _On = Field(repr=False)
+        dimming: _Dimming
         dimming_delta: dict
         color_temperature: Optional["_Lights.ColorTemperature"]
         color_temperature_delta: Optional[dict]
@@ -168,40 +186,40 @@ class _Lights(HueGrouped):
 _Lights.update()
 
 
-class _Scenes(HueGrouped):
+class _Scenes(_HueGrouped):
     class Action(BaseModel):
-        on: Optional[On]
-        dimming: Optional[Dimming]
-        color: Optional[ColorPoint]
+        on: Optional[_On]
+        dimming: Optional[_Dimming]
+        color: Optional[_ColorPoint]
         color_temperature: Optional[dict[str, float]]
-        gradient: Optional[dict[str, list[ColorPoint]]]
+        gradient: Optional[dict[str, list[_ColorPoint]]]
         effects: Optional[dict[str, str]]
         dynamics: Optional[dict[str, float]]
 
     class Actions(BaseModel):
-        target: Identifier
+        target: _Identifier
         action: "_Scenes.Action" = Field(repr=False)
-        dimming: Optional[Dimming]
-        color: Optional[ColorPoint]
+        dimming: Optional[_Dimming]
+        color: Optional[_ColorPoint]
 
     class PaletteColor(BaseModel):
-        color: ColorPoint
-        dimming: Dimming
+        color: _ColorPoint
+        dimming: _Dimming
 
     class PaletteTemperature(BaseModel):
         color_temperature: dict[str, float]
-        dimming: Dimming
+        dimming: _Dimming
 
     class Palette(BaseModel):
         color: list["_Scenes.PaletteColor"]
-        dimming: Optional[list[Dimming]]
+        dimming: Optional[list[_Dimming]]
         color_temperature: list["_Scenes.PaletteTemperature"]
 
     class Scene(BaseModel):
         id: UUID
         id_v1: str = Field(..., regex=r"^(\/[a-z]{4,32}\/[0-9a-zA-Z-]{1,32})?$")
-        metadata: Metadata
-        group: Identifier
+        metadata: _Metadata
+        group: _Identifier
         actions: list["_Scenes.Actions"]
         palette: "_Scenes.Palette"
         speed: float
@@ -215,38 +233,38 @@ _Scenes.update()
 class Room(BaseModel):
     type: Literal["room"]
     id: UUID
-    id_v1: _id_v1
-    services: list[Identifier]
-    metadata: Metadata
-    children: list[Identifier]
+    id_v1: str = Field(..., regex=r"^(\/[a-z]{4,32}\/[0-9a-zA-Z-]{1,32})?$")
+    services: list[_Identifier]
+    metadata: _Metadata
+    children: list[_Identifier]
 
 
 class Zone(BaseModel):
     type: Literal["zone"]
     id: UUID
     id_v1: str = Field(..., regex=r"^(\/[a-z]{4,32}\/[0-9a-zA-Z-]{1,32})?$")
-    services: list[Identifier]
-    metadata: Metadata
-    children: list[Identifier]
+    services: list[_Identifier]
+    metadata: _Metadata
+    children: list[_Identifier]
 
 
 class BridgeHome(BaseModel):
     type: Literal["bridge_home"]
     id: UUID
     id_v1: str = Field(..., regex=r"^(\/[a-z]{4,32}\/[0-9a-zA-Z-]{1,32})?$")
-    services: list[Identifier]
-    children: list[Identifier]
+    services: list[_Identifier]
+    children: list[_Identifier]
 
 
 class GroupedLight(BaseModel):
     type: Literal["grouped_light"]
     id: UUID
     id_v1: str = Field(..., regex=r"^(\/[a-z]{4,32}\/[0-9a-zA-Z-]{1,32})?$")
-    on: On = Field(repr=False)
+    on: _On = Field(repr=False)
     alert: list[str]
 
 
-class ProductData(BaseModel):
+class _ProductData(BaseModel):
     model_id: str
     manufacturer_name: str
     product_name: str
@@ -260,9 +278,9 @@ class Device(BaseModel):
     type: Literal["device"]
     id: UUID
     id_v1: str = Field(..., regex=r"^(\/[a-z]{4,32}\/[0-9a-zA-Z-]{1,32})?$")
-    services: list[Identifier]
-    metadata: Metadata
-    product_data: ProductData
+    services: list[_Identifier]
+    metadata: _Metadata
+    product_data: _ProductData
 
 
 class Bridge(BaseModel):
@@ -273,7 +291,7 @@ class Bridge(BaseModel):
     time_zone: dict[str, str]
 
 
-class PowerState(BaseModel):
+class _PowerState(BaseModel):
     battery_state: Literal["normal", "low", "critical"]
     battery_level: float = Field(lt=100.0, gt=0.0)
 
@@ -282,15 +300,15 @@ class DevicePower(BaseModel):
     type: Literal["device_power"]
     id: UUID
     id_v1: str = Field(..., regex=r"^(\/[a-z]{4,32}\/[0-9a-zA-Z-]{1,32})?$")
-    owner: Identifier
-    power_state: PowerState
+    owner: _Identifier
+    power_state: _PowerState
 
 
 class ZigbeeConnectivity(BaseModel):
     type: Literal["zigbee_connectivity"]
     id: UUID
     id_v1: str = Field(..., regex=r"^(\/[a-z]{4,32}\/[0-9a-zA-Z-]{1,32})?$")
-    owner: Identifier
+    owner: _Identifier
     status: Literal[
         "connected", "disconnected", "connectivity_issue", "unidirectional_incoming"
     ]
@@ -301,7 +319,7 @@ class ZGPConnectivity(BaseModel):
     type: Literal["zgp_connectivity"]
     id: UUID
     id_v1: str = Field(..., regex=r"^(\/[a-z]{4,32}\/[0-9a-zA-Z-]{1,32})?$")
-    owner: Identifier
+    owner: _Identifier
     status: Literal[
         "connected", "disconnected", "connectivity_issue", "unidirectional_incoming"
     ]
@@ -312,7 +330,7 @@ class Motion(BaseModel):
     type: Literal["motion"]
     id: UUID
     id_v1: str = Field(..., regex=r"^(\/[a-z]{4,32}\/[0-9a-zA-Z-]{1,32})?$")
-    owner: Identifier
+    owner: _Identifier
     enabled: bool
     motion: dict[str, bool]
 
@@ -326,7 +344,7 @@ class Temperature(BaseModel):
     type: Literal["temperature"]
     id: UUID
     id_v1: str = Field(..., regex=r"^(\/[a-z]{4,32}\/[0-9a-zA-Z-]{1,32})?$")
-    owner: Identifier
+    owner: _Identifier
     enabled: bool
     temperature: _Temp
 
@@ -340,7 +358,7 @@ class LightLevel(BaseModel):
     type: Literal["light_level"]
     id: UUID
     id_v1: str = Field(..., regex=r"^(\/[a-z]{4,32}\/[0-9a-zA-Z-]{1,32})?$")
-    owner: Identifier
+    owner: _Identifier
     enabled: bool
     light: _Light
 
@@ -349,7 +367,7 @@ class Button(BaseModel):
     type: Literal["button"]
     id: UUID
     id_v1: str = Field(..., regex=r"^(\/[a-z]{4,32}\/[0-9a-zA-Z-]{1,32})?$")
-    owner: Identifier
+    owner: _Identifier
     metadata: dict[Literal["control_id"], int]
     button: dict[
         Literal["last_event"],
@@ -375,9 +393,9 @@ class BehaviorScript(BaseModel):
     metadata: dict[str, str]
 
 
-class Dependee(BaseModel):
+class _Dependee(BaseModel):
     type: str
-    target: Identifier
+    target: _Identifier
     level: str
 
 
@@ -389,7 +407,7 @@ class BehaviorInstance(BaseModel):
     enabled: bool
     state: Optional[dict[str, Any]]
     configuration: dict[str, Any]
-    dependees: list[Dependee]
+    dependees: list[_Dependee]
     status: Literal["initializing", "running", "disabled", "errored"]
     last_error: str
     metadata: dict[Literal["name"], str]
@@ -410,9 +428,9 @@ class Geolocation(BaseModel):
     is_configured: bool = False
 
 
-class StreamProxy(BaseModel):
+class _StreamProxy(BaseModel):
     mode: Literal["auto", "manual"]
-    node: Identifier
+    node: _Identifier
 
 
 class EntertainmentConfiguration(BaseModel):
@@ -423,8 +441,8 @@ class EntertainmentConfiguration(BaseModel):
     name: Optional[str] = ""
     configuration_type: Literal["screen", "monitor", "music", "3dspace", "other"]
     status: Literal["active", "inactive"]
-    active_streamer: Identifier
-    stream_proxy: StreamProxy
+    active_streamer: _Identifier
+    stream_proxy: _StreamProxy
     ...  # TODO: finish the last 4 objects
 
 
