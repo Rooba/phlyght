@@ -9,20 +9,31 @@ except ImportError:
 
 
 async def main():
-    router = Router("user api key")
+    router = Router("your api key")
 
-    lights = await router.get_lights()
-    for light in lights:
-        detailed_light = await router.get_light(light_id=str(light.id))  # noqa
-        print(light, detailed_light)
-
-    scenes = await router.get_scenes()
-    for scene in scenes:
-        print(scene)
-
-    devices = await router.get_devices()
-    for device in devices:
-        print(device)
+    print(await router.get_lights())
+    print(await router.get_scenes())
+    print(await router.get_devices())
+    print(await router.get_rooms())
+    print(await router.get_zones())
+    print(await router.get_bridge_homes())
+    print(await router.get_grouped_lights())
+    print(await router.get_bridges())
+    print(await router.get_device_powers())
+    print(await router.get_zigbee_connectivities())
+    print(await router.get_zgb_connectivities())
+    print(await router.get_motions())
+    print(await router.get_temperatures())
+    print(await router.get_light_levels())
+    print(await router.get_buttons())
+    print(await router.get_behavior_scripts())
+    print(await router.get_behavior_instances())
+    print(await router.get_geofence_clients())
+    print(await router.get_geolocations())
+    print(await router.get_entertainment_configurations())
+    print(await router.get_entertainments())
+    print(await router.get_homekits())
+    print(await router.get_resources())
 
 
 run(main())

@@ -3,6 +3,7 @@ __all__ = ("Router", "route", "RouterMeta", "SubRouter", "HughApi")
 from inspect import signature
 from re import compile
 from typing import Any, Literal, Optional
+from uuid import UUID
 
 from httpx import AsyncClient
 from httpx._urls import URL as _URL
@@ -58,8 +59,10 @@ def ret_cls(cls):
             kwargs.pop("base_uri", None)
             ret = (await fn(self, *args, **kwargs)).json().get("data", [])
             _rets = []
+
             if isinstance(ret, list):
                 for r in ret:
+                    print(r)
                     _rets.append(cls(**r))
             else:
                 return cls(**ret)
@@ -263,17 +266,17 @@ class HughApi(SubRouter):
 
     @ret_cls(models.Scene)
     @route("GET", "/resource/scene/{scene_id}")
-    async def get_scene(self, scene_id: str):
+    async def get_scene(self, scene_id: UUID):
         ...
 
     @ret_cls(models._Identifier)
     @route("PUT", "/resource/scene/{scene_id}")
-    async def set_scene(self, scene_id: str, **kwargs):
+    async def set_scene(self, scene_id: UUID, **kwargs):
         ...
 
     @ret_cls(models._Identifier)
     @route("DELETE", "/resource/scene/{scene_id}")
-    async def delete_scene(self, scene_id: str):
+    async def delete_scene(self, scene_id: UUID):
         ...
 
     @ret_cls(models.Room)
@@ -288,17 +291,22 @@ class HughApi(SubRouter):
 
     @ret_cls(models.Room)
     @route("GET", "/resource/room/{room_id}")
-    async def get_room(self, room_id: str):
+    async def get_room(self, room_id: UUID):
         ...
 
     @ret_cls(models._Identifier)
     @route("PUT", "/resource/room/{room_id}")
-    async def set_room(self, room_id: str, **kwargs):
+    async def set_room(
+        self,
+        room_id: UUID,
+        metadata: Optional[dict[str, str]] = None,
+        children: Optional[models._Identifier] = None,
+    ):
         ...
 
     @ret_cls(models._Identifier)
     @route("DELETE", "/resource/room/{room_id}")
-    async def delete_room(self, room_id: str):
+    async def delete_room(self, room_id: UUID):
         ...
 
     @ret_cls(models.Zone)
@@ -313,17 +321,17 @@ class HughApi(SubRouter):
 
     @ret_cls(models.Zone)
     @route("GET", "/resource/zone/{zone_id}")
-    async def get_zone(self, zone_id: str):
+    async def get_zone(self, zone_id: UUID):
         ...
 
     @ret_cls(models._Identifier)
     @route("PUT", "/resource/zone/{zone_id}")
-    async def set_zone(self, zone_id: str, **kwargs):
+    async def set_zone(self, zone_id: UUID, **kwargs):
         ...
 
     @ret_cls(models._Identifier)
     @route("DELETE", "/resource/zone/{zone_id}")
-    async def delete_zone(self, zone_id: str):
+    async def delete_zone(self, zone_id: UUID):
         ...
 
     @ret_cls(models.BridgeHome)
@@ -333,12 +341,12 @@ class HughApi(SubRouter):
 
     @ret_cls(models.BridgeHome)
     @route("GET", "/resource/bridge_home/{bridge_home_id}")
-    async def get_bridge_home(self, bridge_home_id: str):
+    async def get_bridge_home(self, bridge_home_id: UUID):
         ...
 
     @ret_cls(models._Identifier)
     @route("PUT", "/resource/bridge_home/{bridge_home_id}")
-    async def set_bridge_home(self, bridge_home_id: str, **kwargs):
+    async def set_bridge_home(self, bridge_home_id: UUID, **kwargs):
         ...
 
     @ret_cls(models.GroupedLight)
@@ -348,12 +356,12 @@ class HughApi(SubRouter):
 
     @ret_cls(models.GroupedLight)
     @route("GET", "/resource/grouped_light/{grouped_light_id}")
-    async def get_grouped_light(self, grouped_light_id: str):
+    async def get_grouped_light(self, grouped_light_id: UUID):
         ...
 
     @ret_cls(models._Identifier)
     @route("PUT", "/resource/grouped_light/{grouped_light_id}")
-    async def set_grouped_light(self, grouped_light_id: str, **kwargs):
+    async def set_grouped_light(self, grouped_light_id: UUID, **kwargs):
         ...
 
     @ret_cls(models.Device)
@@ -363,12 +371,12 @@ class HughApi(SubRouter):
 
     @ret_cls(models.Device)
     @route("GET", "/resource/device/{device_id}")
-    async def get_device(self, device_id: str):
+    async def get_device(self, device_id: UUID):
         ...
 
     @ret_cls(models._Identifier)
     @route("PUT", "/resource/device/{device_id}")
-    async def set_device(self, device_id: str, **kwargs):
+    async def set_device(self, device_id: UUID, **kwargs):
         ...
 
     @ret_cls(models.Bridge)
@@ -378,12 +386,12 @@ class HughApi(SubRouter):
 
     @ret_cls(models.Bridge)
     @route("GET", "/resource/bridges/{bridge_id}")
-    async def get_bridge(self, bridge_id: str):
+    async def get_bridge(self, bridge_id: UUID):
         ...
 
     @ret_cls(models._Identifier)
     @route("PUT", "/resource/bridges/{bridge_id}")
-    async def set_bridge(self, bridge_id: str, **kwargs):
+    async def set_bridge(self, bridge_id: UUID, **kwargs):
         ...
 
     @ret_cls(models.DevicePower)
@@ -393,12 +401,12 @@ class HughApi(SubRouter):
 
     @ret_cls(models.DevicePower)
     @route("GET", "/resource/device_power/{device_power_id}")
-    async def get_device_power(self, device_power_id: str):
+    async def get_device_power(self, device_power_id: UUID):
         ...
 
     @ret_cls(models._Identifier)
     @route("PUT", "/resource/device_power/{device_power_id}")
-    async def set_device_power(self, device_power_id: str, **kwargs):
+    async def set_device_power(self, device_power_id: UUID, **kwargs):
         ...
 
     @ret_cls(models.ZigbeeConnectivity)
@@ -408,12 +416,12 @@ class HughApi(SubRouter):
 
     @ret_cls(models.ZigbeeConnectivity)
     @route("GET", "/resource/zigbee_connectivity/{zigbee_connectivity_id}")
-    async def get_zigbee_connectivity(self, zigbee_connectivity_id: str):
+    async def get_zigbee_connectivity(self, zigbee_connectivity_id: UUID):
         ...
 
     @ret_cls(models._Identifier)
     @route("PUT", "/resource/zigbee_connectivity/{zigbee_connectivity_id}")
-    async def set_zigbee_connectivity(self, zigbee_connectivity_id: str, **kwargs):
+    async def set_zigbee_connectivity(self, zigbee_connectivity_id: UUID, **kwargs):
         ...
 
     @ret_cls(models.ZGPConnectivity)
@@ -423,12 +431,12 @@ class HughApi(SubRouter):
 
     @ret_cls(models.ZGPConnectivity)
     @route("GET", "/resource/zgb_connectivity/{zgb_connectivity_id}")
-    async def get_zgb_connectivity(self, zgb_connectivity_id: str):
+    async def get_zgb_connectivity(self, zgb_connectivity_id: UUID):
         ...
 
     @ret_cls(models._Identifier)
     @route("PUT", "/resource/zgb_connectivity/{zgb_connectivity_id}")
-    async def set_zgb_connectivity(self, zgb_connectivity_id: str, **kwargs):
+    async def set_zgb_connectivity(self, zgb_connectivity_id: UUID, **kwargs):
         ...
 
     @ret_cls(models.Motion)
@@ -438,12 +446,12 @@ class HughApi(SubRouter):
 
     @ret_cls(models.Motion)
     @route("GET", "/resource/motion/{motion_id}")
-    async def get_motion(self, motion_id: str):
+    async def get_motion(self, motion_id: UUID):
         ...
 
     @ret_cls(models._Identifier)
     @route("PUT", "/resource/motion/{motion_id}")
-    async def set_motion(self, motion_id: str, **kwargs):
+    async def set_motion(self, motion_id: UUID, **kwargs):
         ...
 
     @ret_cls(models.Temperature)
@@ -453,12 +461,12 @@ class HughApi(SubRouter):
 
     @ret_cls(models.Temperature)
     @route("GET", "/resource/temperature/{temperature_id}")
-    async def get_temperature(self, temperature_id: str):
+    async def get_temperature(self, temperature_id: UUID):
         ...
 
     @ret_cls(models._Identifier)
     @route("PUT", "/resource/temperature/{temperature_id}")
-    async def set_temperature(self, temperature_id: str, **kwargs):
+    async def set_temperature(self, temperature_id: UUID, **kwargs):
         ...
 
     @ret_cls(models.LightLevel)
@@ -468,12 +476,12 @@ class HughApi(SubRouter):
 
     @ret_cls(models.LightLevel)
     @route("GET", "/resource/light_level/{light_level_id}")
-    async def get_light_level(self, light_level_id: str):
+    async def get_light_level(self, light_level_id: UUID):
         ...
 
     @ret_cls(models._Identifier)
     @route("PUT", "/resource/light_level/{light_level_id}")
-    async def set_light_level(self, light_level_id: str, **kwargs):
+    async def set_light_level(self, light_level_id: UUID, **kwargs):
         ...
 
     @ret_cls(models.Button)
@@ -483,12 +491,12 @@ class HughApi(SubRouter):
 
     @ret_cls(models.Button)
     @route("GET", "/resource/button/{button_id}")
-    async def get_button(self, button_id: str):
+    async def get_button(self, button_id: UUID):
         ...
 
     @ret_cls(models._Identifier)
     @route("PUT", "/resource/button/{button_id}")
-    async def set_button(self, button_id: str, **kwargs):
+    async def set_button(self, button_id: UUID, **kwargs):
         ...
 
     @ret_cls(models.BehaviorScript)
@@ -498,7 +506,7 @@ class HughApi(SubRouter):
 
     @ret_cls(models.BehaviorScript)
     @route("GET", "/resource/behavior_script/{behavior_script_id}")
-    async def get_behavior_script(self, behavior_script_id: str):
+    async def get_behavior_script(self, behavior_script_id: UUID):
         ...
 
     @ret_cls(models.BehaviorInstance)
@@ -513,17 +521,17 @@ class HughApi(SubRouter):
 
     @ret_cls(models.BehaviorInstance)
     @route("GET", "/resource/behavior_instance/{behavior_instance_id}")
-    async def get_behavior_instance(self, behavior_instance_id: str):
+    async def get_behavior_instance(self, behavior_instance_id: UUID):
         ...
 
     @ret_cls(models._Identifier)
     @route("PUT", "/resource/behavior_instance/{behavior_instance_id}")
-    async def set_behavior_instance(self, behavior_instance_id: str, **kwargs):
+    async def set_behavior_instance(self, behavior_instance_id: UUID, **kwargs):
         ...
 
     @ret_cls(models._Identifier)
     @route("DELETE", "/resource/behavior_instance/{behavior_instance_id}")
-    async def delete_behavior_instance(self, behavior_instance_id: str):
+    async def delete_behavior_instance(self, behavior_instance_id: UUID):
         ...
 
     @ret_cls(models.GeofenceClient)
@@ -538,17 +546,17 @@ class HughApi(SubRouter):
 
     @ret_cls(models.GeofenceClient)
     @route("GET", "/resource/geofence_client/{geofence_client_id}")
-    async def get_geofence_client(self, geofence_client_id: str):
+    async def get_geofence_client(self, geofence_client_id: UUID):
         ...
 
     @ret_cls(models._Identifier)
     @route("PUT", "/resource/geofence_client/{geofence_client_id}")
-    async def set_geofence_client(self, geofence_client_id: str, **kwargs):
+    async def set_geofence_client(self, geofence_client_id: UUID, **kwargs):
         ...
 
     @ret_cls(models._Identifier)
     @route("DELETE", "/resource/geofence_client/{geofence_client_id}")
-    async def delete_geofence_client(self, geofence_client_id: str):
+    async def delete_geofence_client(self, geofence_client_id: UUID):
         ...
 
     @ret_cls(models.Geolocation)
@@ -558,12 +566,12 @@ class HughApi(SubRouter):
 
     @ret_cls(models.Geolocation)
     @route("GET", "/resource/geolocation/{geolocation_id}")
-    async def get_geolocation(self, geolocation_id: str):
+    async def get_geolocation(self, geolocation_id: UUID):
         ...
 
     @ret_cls(models._Identifier)
     @route("PUT", "/resource/geolocation/{geolocation_id}")
-    async def set_geolocation(self, geolocation_id: str, **kwargs):
+    async def set_geolocation(self, geolocation_id: UUID, **kwargs):
         ...
 
     @ret_cls(models.EntertainmentConfiguration)
@@ -581,7 +589,7 @@ class HughApi(SubRouter):
         "GET", "/resource/entertainment_configuration/{entertainment_configuration_id}"
     )
     async def get_entertainment_configuration(
-        self, entertainment_configuration_id: str
+        self, entertainment_configuration_id: UUID
     ):
         ...
 
@@ -590,7 +598,7 @@ class HughApi(SubRouter):
         "PUT", "/resource/entertainment_configuration/{entertainment_configuration_id}"
     )
     async def set_entertainment_configuration(
-        self, entertainment_configuration_id: str, **kwargs
+        self, entertainment_configuration_id: UUID, **kwargs
     ):
         ...
 
@@ -600,7 +608,7 @@ class HughApi(SubRouter):
         "/resource/entertainment_configuration/{entertainment_configuration_id}",
     )
     async def delete_entertainment_configuration(
-        self, entertainment_configuration_id: str
+        self, entertainment_configuration_id: UUID
     ):
         ...
 
@@ -611,12 +619,12 @@ class HughApi(SubRouter):
 
     @ret_cls(models.Entertainment)
     @route("GET", "/resource/entertainment/{entertainment_id}")
-    async def get_entertainment(self, entertainment_id: str):
+    async def get_entertainment(self, entertainment_id: UUID):
         ...
 
     @ret_cls(models._Identifier)
     @route("PUT", "/resource/entertainment/{entertainment_id}")
-    async def set_entertainment(self, entertainment_id: str, **kwargs):
+    async def set_entertainment(self, entertainment_id: UUID, **kwargs):
         ...
 
     @ret_cls(models.Homekit)
@@ -626,12 +634,17 @@ class HughApi(SubRouter):
 
     @ret_cls(models.Homekit)
     @route("GET", "/resource/homekit/{homekit_id}")
-    async def get_homekit(self, homekit_id: str):
+    async def get_homekit(self, homekit_id: UUID):
         ...
 
     @ret_cls(models._Identifier)
     @route("PUT", "/resource/homekit/{homekit_id}")
-    async def set_homekit(self, homekit_id: str, **kwargs):
+    async def set_homekit(
+        self,
+        homekit_id: UUID,
+        type: Optional[str] = None,
+        action: Optional[Literal["homekit_reset"]] = None,
+    ):
         ...
 
     @ret_cls(models.Resource)

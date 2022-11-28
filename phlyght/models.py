@@ -1,4 +1,4 @@
-from typing import Any, Literal, Optional, Generic, TypeVar
+from typing import Any, Literal, Optional, Generic, TypeAlias, TypeVar
 from uuid import UUID
 from dataclasses import dataclass
 from enum import Enum, auto
@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 
 __all__ = (
     "Archetype",
+    "RoomType",
     "Room",
     "Light",
     "Scene",
@@ -27,9 +28,62 @@ __all__ = (
     "GeofenceClient",
     "Geolocation",
     "EntertainmentConfiguration",
+    "Entertainment",
+    "Resource",
+    "Homekit",
 )
 
+_T_M: TypeAlias = "Archetype | Room | Light | Scene | Zone | BridgeHome | GroupedLight | Device | Bridge | DevicePower | ZigbeeConnectivity | ZGPConnectivity | Motion | Temperature | LightLevel | Button | BehaviorScript | BehaviorInstance | GeofenceClient | Geolocation | EntertainmentConfiguration | Entertainment | Resource | Homekit"
+
+
 _T = TypeVar("_T")
+
+
+class RoomType(Enum):
+    @staticmethod
+    def _generate_next_value_(name, start, count, last_values):
+        return name.lower()
+
+    LIVING_ROOM = auto()
+    KITCHEN = auto()
+    DINING = auto()
+    BEDROOM = auto()
+    KIDS_BEDROOM = auto()
+    BATHROOM = auto()
+    NURSERY = auto()
+    RECREATION = auto()
+    OFFICE = auto()
+    GYM = auto()
+    HALLWAY = auto()
+    TOILET = auto()
+    FRONT_DOOR = auto()
+    GARAGE = auto()
+    TERRACE = auto()
+    GARDEN = auto()
+    DRIVEWAY = auto()
+    CARPORT = auto()
+    HOME = auto()
+    DOWNSTAIRS = auto()
+    UPSTAIRS = auto()
+    TOP_FLOOR = auto()
+    ATTIC = auto()
+    GUEST_ROOM = auto()
+    STAIRCASE = auto()
+    LOUNGE = auto()
+    MAN_CAVE = auto()
+    COMPUTER = auto()
+    STUDIO = auto()
+    MUSIC = auto()
+    TV = auto()
+    READING = auto()
+    CLOSET = auto()
+    STORAGE = auto()
+    LAUNDRY_ROOM = auto()
+    BALCONY = auto()
+    PORCH = auto()
+    BARBECUE = auto()
+    POOL = auto()
+    OTHER = auto()
 
 
 class Archetype(Enum):
@@ -109,7 +163,7 @@ class _Identifier:
 @dataclass(frozen=True)
 class _Metadata:
     name: str
-    archetype: Optional[Archetype] = Archetype.UNKNOWN_ARCHETYPE
+    archetype: Optional[Archetype | RoomType] = Archetype.UNKNOWN_ARCHETYPE
     image: Optional[_Identifier] = Field(None, repr=False)
 
 
@@ -165,7 +219,9 @@ class _Lights(_HueGrouped):
 
     class Light(Generic[_T], BaseModel):
         id: UUID
-        id_v1: str = Field(..., regex=r"^(\/[a-z]{4,32}\/[0-9a-zA-Z-]{1,32})?$")
+        id_v1: Optional[str] = Field(
+            ..., regex=r"^(\/[a-z]{4,32}\/[0-9a-zA-Z-]{1,32})?$"
+        )
         owner: _Identifier
         metadata: _Metadata
         on: _On = Field(repr=False)
@@ -217,7 +273,9 @@ class _Scenes(_HueGrouped):
 
     class Scene(BaseModel):
         id: UUID
-        id_v1: str = Field(..., regex=r"^(\/[a-z]{4,32}\/[0-9a-zA-Z-]{1,32})?$")
+        id_v1: Optional[str] = Field(
+            ..., regex=r"^(\/[a-z]{4,32}\/[0-9a-zA-Z-]{1,32})?$"
+        )
         metadata: _Metadata
         group: _Identifier
         actions: list["_Scenes.Actions"]
@@ -233,7 +291,7 @@ _Scenes.update()
 class Room(BaseModel):
     type: Literal["room"]
     id: UUID
-    id_v1: str = Field(..., regex=r"^(\/[a-z]{4,32}\/[0-9a-zA-Z-]{1,32})?$")
+    id_v1: Optional[str] = Field("", regex=r"^(\/[a-z]{4,32}\/[0-9a-zA-Z-]{1,32})?$")
     services: list[_Identifier]
     metadata: _Metadata
     children: list[_Identifier]
@@ -242,7 +300,7 @@ class Room(BaseModel):
 class Zone(BaseModel):
     type: Literal["zone"]
     id: UUID
-    id_v1: str = Field(..., regex=r"^(\/[a-z]{4,32}\/[0-9a-zA-Z-]{1,32})?$")
+    id_v1: Optional[str] = Field("", regex=r"^(\/[a-z]{4,32}\/[0-9a-zA-Z-]{1,32})?$")
     services: list[_Identifier]
     metadata: _Metadata
     children: list[_Identifier]
@@ -251,7 +309,7 @@ class Zone(BaseModel):
 class BridgeHome(BaseModel):
     type: Literal["bridge_home"]
     id: UUID
-    id_v1: str = Field(..., regex=r"^(\/[a-z]{4,32}\/[0-9a-zA-Z-]{1,32})?$")
+    id_v1: Optional[str] = Field("", regex=r"^(\/[a-z]{4,32}\/[0-9a-zA-Z-]{1,32})?$")
     services: list[_Identifier]
     children: list[_Identifier]
 
@@ -259,9 +317,9 @@ class BridgeHome(BaseModel):
 class GroupedLight(BaseModel):
     type: Literal["grouped_light"]
     id: UUID
-    id_v1: str = Field(..., regex=r"^(\/[a-z]{4,32}\/[0-9a-zA-Z-]{1,32})?$")
+    id_v1: Optional[str] = Field("", regex=r"^(\/[a-z]{4,32}\/[0-9a-zA-Z-]{1,32})?$")
     on: _On = Field(repr=False)
-    alert: list[str]
+    alert: dict[str, list[str]]
 
 
 class _ProductData(BaseModel):
@@ -277,7 +335,7 @@ class _ProductData(BaseModel):
 class Device(BaseModel):
     type: Literal["device"]
     id: UUID
-    id_v1: str = Field(..., regex=r"^(\/[a-z]{4,32}\/[0-9a-zA-Z-]{1,32})?$")
+    id_v1: Optional[str] = Field("", regex=r"^(\/[a-z]{4,32}\/[0-9a-zA-Z-]{1,32})?$")
     services: list[_Identifier]
     metadata: _Metadata
     product_data: _ProductData
@@ -286,20 +344,20 @@ class Device(BaseModel):
 class Bridge(BaseModel):
     type: Literal["bridge"]
     id: UUID
-    id_v1: str = Field(..., regex=r"^(\/[a-z]{4,32}\/[0-9a-zA-Z-]{1,32})?$")
+    id_v1: Optional[str] = Field("", regex=r"^(\/[a-z]{4,32}\/[0-9a-zA-Z-]{1,32})?$")
     bridge_id: str
     time_zone: dict[str, str]
 
 
 class _PowerState(BaseModel):
     battery_state: Literal["normal", "low", "critical"]
-    battery_level: float = Field(lt=100.0, gt=0.0)
+    battery_level: float = Field(le=100.0, ge=0.0)
 
 
 class DevicePower(BaseModel):
     type: Literal["device_power"]
     id: UUID
-    id_v1: str = Field(..., regex=r"^(\/[a-z]{4,32}\/[0-9a-zA-Z-]{1,32})?$")
+    id_v1: Optional[str] = Field("", regex=r"^(\/[a-z]{4,32}\/[0-9a-zA-Z-]{1,32})?$")
     owner: _Identifier
     power_state: _PowerState
 
@@ -307,7 +365,7 @@ class DevicePower(BaseModel):
 class ZigbeeConnectivity(BaseModel):
     type: Literal["zigbee_connectivity"]
     id: UUID
-    id_v1: str = Field(..., regex=r"^(\/[a-z]{4,32}\/[0-9a-zA-Z-]{1,32})?$")
+    id_v1: Optional[str] = Field("", regex=r"^(\/[a-z]{4,32}\/[0-9a-zA-Z-]{1,32})?$")
     owner: _Identifier
     status: Literal[
         "connected", "disconnected", "connectivity_issue", "unidirectional_incoming"
@@ -318,7 +376,7 @@ class ZigbeeConnectivity(BaseModel):
 class ZGPConnectivity(BaseModel):
     type: Literal["zgp_connectivity"]
     id: UUID
-    id_v1: str = Field(..., regex=r"^(\/[a-z]{4,32}\/[0-9a-zA-Z-]{1,32})?$")
+    id_v1: Optional[str] = Field("", regex=r"^(\/[a-z]{4,32}\/[0-9a-zA-Z-]{1,32})?$")
     owner: _Identifier
     status: Literal[
         "connected", "disconnected", "connectivity_issue", "unidirectional_incoming"
@@ -329,7 +387,7 @@ class ZGPConnectivity(BaseModel):
 class Motion(BaseModel):
     type: Literal["motion"]
     id: UUID
-    id_v1: str = Field(..., regex=r"^(\/[a-z]{4,32}\/[0-9a-zA-Z-]{1,32})?$")
+    id_v1: Optional[str] = Field("", regex=r"^(\/[a-z]{4,32}\/[0-9a-zA-Z-]{1,32})?$")
     owner: _Identifier
     enabled: bool
     motion: dict[str, bool]
@@ -343,7 +401,7 @@ class _Temp(BaseModel):
 class Temperature(BaseModel):
     type: Literal["temperature"]
     id: UUID
-    id_v1: str = Field(..., regex=r"^(\/[a-z]{4,32}\/[0-9a-zA-Z-]{1,32})?$")
+    id_v1: Optional[str] = Field("", regex=r"^(\/[a-z]{4,32}\/[0-9a-zA-Z-]{1,32})?$")
     owner: _Identifier
     enabled: bool
     temperature: _Temp
@@ -357,7 +415,7 @@ class _Light(BaseModel):
 class LightLevel(BaseModel):
     type: Literal["light_level"]
     id: UUID
-    id_v1: str = Field(..., regex=r"^(\/[a-z]{4,32}\/[0-9a-zA-Z-]{1,32})?$")
+    id_v1: Optional[str] = Field("", regex=r"^(\/[a-z]{4,32}\/[0-9a-zA-Z-]{1,32})?$")
     owner: _Identifier
     enabled: bool
     light: _Light
@@ -366,7 +424,7 @@ class LightLevel(BaseModel):
 class Button(BaseModel):
     type: Literal["button"]
     id: UUID
-    id_v1: str = Field(..., regex=r"^(\/[a-z]{4,32}\/[0-9a-zA-Z-]{1,32})?$")
+    id_v1: Optional[str] = Field("", regex=r"^(\/[a-z]{4,32}\/[0-9a-zA-Z-]{1,32})?$")
     owner: _Identifier
     metadata: dict[Literal["control_id"], int]
     button: dict[
@@ -384,7 +442,7 @@ class Button(BaseModel):
 class BehaviorScript(BaseModel):
     type: Literal["behavior_script"]
     id: UUID
-    id_v1: str = Field(..., regex=r"^(\/[a-z]{4,32}\/[0-9a-zA-Z-]{1,32})?$")
+    id_v1: Optional[str] = Field("", regex=r"^(\/[a-z]{4,32}\/[0-9a-zA-Z-]{1,32})?$")
     description: str
     configuration_schema: dict[str, Any]
     trigger_schema: dict[str, Any]
@@ -402,7 +460,7 @@ class _Dependee(BaseModel):
 class BehaviorInstance(BaseModel):
     type: Literal["behavior_instance"]
     id: UUID
-    id_v1: str = Field("", regex=r"^(\/[a-z]{4,32}\/[0-9a-zA-Z-]{1,32})?$")
+    id_v1: Optional[str] = Field("", regex=r"^(\/[a-z]{4,32}\/[0-9a-zA-Z-]{1,32})?$")
     script_id: str
     enabled: bool
     state: Optional[dict[str, Any]]
@@ -417,14 +475,14 @@ class BehaviorInstance(BaseModel):
 class GeofenceClient(BaseModel):
     type: Literal["geofence_client"]
     id: UUID
-    id_v1: str = Field(..., regex=r"^(\/[a-z]{4,32}\/[0-9a-zA-Z-]{1,32})?$")
+    id_v1: Optional[str] = Field("", regex=r"^(\/[a-z]{4,32}\/[0-9a-zA-Z-]{1,32})?$")
     name: str
 
 
 class Geolocation(BaseModel):
     type: Literal["geolocation"]
     id: UUID
-    id_v1: str = Field(..., regex=r"^(\/[a-z]{4,32}\/[0-9a-zA-Z-]{1,32})?$")
+    id_v1: Optional[str] = Field("", regex=r"^(\/[a-z]{4,32}\/[0-9a-zA-Z-]{1,32})?$")
     is_configured: bool = False
 
 
@@ -433,29 +491,81 @@ class _StreamProxy(BaseModel):
     node: _Identifier
 
 
+class _XYZ(BaseModel):
+    x: float = Field(ge=-1.0, le=1.0)
+    y: float = Field(ge=-1.0, le=1.0)
+    z: float = Field(ge=-1.0, le=1.0)
+
+
+class _SegmentRef(BaseModel):
+    service: _Identifier
+    index: int
+
+
+class _EntertainmentChannel(BaseModel):
+    channel_id: int = Field(ge=0, le=255)
+    position: _XYZ
+    members: list[_SegmentRef]
+
+
+class _ServiceLocation(BaseModel):
+    service: _Identifier
+    position: _XYZ
+    positions: list[_XYZ] = Field(max_items=2, min_items=1)
+
+
+class _EntertainmentLocation(BaseModel):
+    service_location: Optional[list[_ServiceLocation]] = []
+
+
 class EntertainmentConfiguration(BaseModel):
     type: Literal["entertainment_configuration"]
     id: UUID
-    id_v1: str = Field(..., regex=r"^(\/[a-z]{4,32}\/[0-9a-zA-Z-]{1,32})?$")
+    id_v1: Optional[str] = Field("", regex=r"^(\/[a-z]{4,32}\/[0-9a-zA-Z-]{1,32})?$")
     metadata: dict[Literal["name"], str]
     name: Optional[str] = ""
     configuration_type: Literal["screen", "monitor", "music", "3dspace", "other"]
     status: Literal["active", "inactive"]
-    active_streamer: _Identifier
+    active_streamer: Optional[_Identifier] = None
     stream_proxy: _StreamProxy
-    ...  # TODO: finish the last 4 objects
+    channels: list[_EntertainmentChannel]
+    locations: Optional[_EntertainmentLocation] = None
+    light_services: list[_Identifier]
+
+
+class _Segment(BaseModel):
+    start: int = Field(..., ge=0)
+    length: int = Field(..., ge=1)
+
+
+class _SegmentManager(BaseModel):
+    configurable: bool
+    max_segments: int = Field(..., ge=1)
+    segments: list[_Segment]
 
 
 class Entertainment(BaseModel):
-    ...
+    type: Literal["entertainment"]
+    id: UUID
+    id_v1: Optional[str] = Field("", regex=r"^(\/[a-z]{4,32}\/[0-9a-zA-Z-]{1,32})?$")
+    owner: _Identifier
+    renderer: bool
+    proxy: bool
+    max_streams: Optional[int] = Field(1, ge=1)
+    segments: Optional[_SegmentManager] = None
 
 
 class Homekit(BaseModel):
-    ...
+    id: UUID
+    type: Optional[str]
+    id_v1: Optional[str] = Field("", regex=r"^(\/[a-z]{4,32}\/[0-9a-zA-Z-]{1,32})?$")
+    status: Literal["paired", "pairing", "unpaired"]
 
 
 class Resource(BaseModel):
-    ...
+    id: UUID
+    type: Optional[str]
+    id_v1: Optional[str] = Field("", regex=r"^(\/[a-z]{4,32}\/[0-9a-zA-Z-]{1,32})?$")
 
 
 Light = _Lights.Light
