@@ -5,9 +5,11 @@ from phlyght.api import Router
 
 
 async def main():
-    router = Router("ur api key")
+    router = Router("TzPrxDf9hyWZoR5jvUaGDZn4Hlxp2XF67ue4ynSI")
     lights = await router.get_lights()
-    print(lights.json())
+    for light in lights:
+        detailed_light = await router.get_light(light_id=str(light.id))
+        print(detailed_light)
 
 
 run(main())
