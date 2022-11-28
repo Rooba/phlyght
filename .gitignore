@@ -1,6 +1,5 @@
-**/app.py
-**/phlyght.*
-**/phlyght.*
 **/poetry.lock
 **/__pycache__
+**/testing
+
 !test.py
