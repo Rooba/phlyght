@@ -1,4 +1,4 @@
-from asyncio import run
+from asyncio import run, sleep
 
 from phlyght.api import Router
 
@@ -9,31 +9,34 @@ except ImportError:
 
 
 async def main():
-    router = Router("your api key")
+    router = Router("ur key")
 
     print(await router.get_lights())
     print(await router.get_scenes())
     print(await router.get_devices())
-    print(await router.get_rooms())
-    print(await router.get_zones())
-    print(await router.get_bridge_homes())
-    print(await router.get_grouped_lights())
-    print(await router.get_bridges())
-    print(await router.get_device_powers())
-    print(await router.get_zigbee_connectivities())
-    print(await router.get_zgb_connectivities())
+    await router.get_rooms()
+    await router.get_zones()
+    await router.get_bridge_homes()
+    await router.get_grouped_lights()
+    await router.get_bridges()
+    await router.get_device_powers()
+    await router.get_zigbee_connectivities()
+    await router.get_zgb_connectivities()
     print(await router.get_motions())
     print(await router.get_temperatures())
-    print(await router.get_light_levels())
-    print(await router.get_buttons())
-    print(await router.get_behavior_scripts())
-    print(await router.get_behavior_instances())
-    print(await router.get_geofence_clients())
-    print(await router.get_geolocations())
-    print(await router.get_entertainment_configurations())
-    print(await router.get_entertainments())
-    print(await router.get_homekits())
-    print(await router.get_resources())
+    await router.get_light_levels()
+    await router.get_buttons()
+    await router.get_behavior_scripts()
+    await router.get_behavior_instances()
+    await router.get_geofence_clients()
+    await router.get_geolocations()
+    await router.get_entertainment_configurations()
+    await router.get_entertainments()
+    await router.get_homekits()
+    await router.get_resources()
+    await router._subscribe()
+    while True:
+        await sleep(5)
 
 
 run(main())

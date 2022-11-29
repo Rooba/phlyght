@@ -1,5 +1,6 @@
 __all__ = ("Router", "route", "RouterMeta", "SubRouter", "HughApi")
 
+from asyncio import get_running_loop, sleep
 from inspect import signature
 from re import compile
 from typing import Any, Literal, Optional
@@ -7,6 +8,11 @@ from uuid import UUID
 
 from httpx import AsyncClient
 from httpx._urls import URL as _URL
+from httpx._exceptions import ConnectTimeout
+from httpcore._exceptions import ReadTimeout
+from json import loads
+from pydantic import BaseModel
+
 
 try:
     from yarl import URL as UR
@@ -23,6 +29,21 @@ from . import models
 
 STR_FMT_RE = compile(r"""(?=(\{([^:]+)(?::([^}]+))?\}))\1""")
 URL_TYPES = {"str": str, "int": int}
+
+MSG_RE = compile(
+    b"""(?=((?P<hello>^hi\\n\\n$)|^id:\\s(?P<id>[0-9]+:\\d*?)\\ndata:(?P<data>[^$]+)\\n\\n))\\1"""
+)
+TYPE_CACHE = {}
+
+for k in models.__all__:
+    if (
+        k == "Literal"
+        or k.startswith("_")
+        or not issubclass(getattr(models, k), BaseModel)
+    ):
+        continue
+    # print(getattr(models, k).__dict__)
+    TYPE_CACHE[getattr(models, k).__fields__["type"].default] = getattr(models, k)
 
 
 def get_url_args(url):
@@ -62,7 +83,6 @@ def ret_cls(cls):
 
             if isinstance(ret, list):
                 for r in ret:
-                    print(r)
                     _rets.append(cls(**r))
             else:
                 return cls(**ret)
@@ -85,6 +105,10 @@ def route(method, endpoint) -> Any:
         ):
             params = params or {}
             data = data or {}
+            if "headers" in kwargs:
+                headers = kwargs.pop("headers")
+            else:
+                headers = None
             for param_name, param in signature(fn).parameters.items():
                 if param_name == "self":
                     continue
@@ -137,13 +161,24 @@ def route(method, endpoint) -> Any:
             else:
                 new_endpoint = URL(f"{self._api_path}") / endpoint
 
-            return await self._client.request(
-                method,
-                new_endpoint,
-                content=content,
-                data=data,
-                params=params,
-            )
+            if headers and headers.get("Accept", "") == "text/event-stream":
+                return self._client.stream(
+                    method,
+                    new_endpoint,
+                    content=content,
+                    data=data,
+                    params=params,
+                    headers=headers,
+                )
+            else:
+                return await self._client.request(
+                    method,
+                    new_endpoint,
+                    content=content,
+                    data=data,
+                    params=params,
+                    headers=headers,
+                )
 
         return sub_wrap
 
@@ -652,8 +687,49 @@ class HughApi(SubRouter):
     async def get_resources(self):
         ...
 
+    @route("GET", "/../../eventstream/clip/v2")
+    async def listen_events(self):
+        ...
+
 
 class Router(HughApi, root="https://192.168.69.104"):
     def __init__(self, hue_api_key: str):
         super().__init__(hue_api_key)
         self._client = AsyncClient(headers=self._headers, verify=False)
+        self._subscription = None
+
+    def subscribe(self, *args, **kwargs):
+        if not self._subscription or self._subscription.done():
+            self._subscription = get_running_loop().create_task(self._subscribe())
+
+    async def _subscribe(self, *args, **kwargs):
+        stream = await self.listen_events(
+            headers={"Accept": "text/event-stream"} | self._headers
+        )
+
+        while get_running_loop().is_running():
+            resp = await stream.gen.__anext__()
+            _bound = resp.stream._stream._httpcore_stream
+            try:
+                async for msg in _bound:
+                    payload = []
+                    _match = MSG_RE.search(msg)
+                    id_ = ""
+                    if _match:
+                        if _match.groupdict().get("hello", None):
+                            #  Handshake / Heartbeat
+                            ...
+                        else:
+                            payload = loads(_match.group("data"))
+                            id_ = _match.group("id").decode()
+                    objs = []
+                    for event in payload:
+                        for ob in event["data"]:
+                            objs.append(TYPE_CACHE[ob["type"]](**ob))
+
+                    print(objs)
+
+            except ReadTimeout:
+                stream = await self.listen_events(
+                    headers={"Accept": "text/event-stream"} | self._headers
+                )

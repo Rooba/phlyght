@@ -1,6 +1,6 @@
 from .api import Router
 from .models import (
-    Archetype,
+    _Archetype,
     Room,
     Light,
     Scene,
@@ -25,7 +25,7 @@ from .models import (
 
 __all__ = (
     "Router",
-    "Archetype",
+    "_Archetype",
     "Room",
     "Light",
     "Scene",
