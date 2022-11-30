@@ -1,6 +1,10 @@
+**/.vscode
+**/.mypy_cache
+**/config.yaml
 **/.venv
 **/poetry.lock
 **/__pycache__
 **/testing
 
 !test.py
+test2.py
