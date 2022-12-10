@@ -16,7 +16,7 @@ async def main():
 
     while True:
         # this will query for all lights every 10 seconds
-        print(await router.get_lights)
+        print(await router.get_lights())
         await sleep(10.0)
 
 

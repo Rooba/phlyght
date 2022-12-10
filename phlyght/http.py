@@ -1,7 +1,7 @@
-__all__ = ("Router", "route", "RouterMeta", "SubRouter", "HughApi")
+__all__ = ("Router", "route", "RouterMeta", "SubRouter", "HueAPIv2")
 
 from asyncio import get_running_loop, sleep
-from inspect import signature
+from inspect import signature, Parameter
 from re import compile
 from typing import Any, Literal, Optional
 from uuid import UUID
@@ -9,6 +9,7 @@ from time import time
 
 from httpx import AsyncClient
 from httpx._urls import URL as _URL
+from httpx._exceptions import ReadTimeout as HTTPxReadTimeout
 from httpcore._exceptions import ReadTimeout
 from attrs import define, field
 from json import loads
@@ -26,25 +27,25 @@ except ImportError:
     ...
 
 from . import models
+from .models import HueEntsV2
 
 
 STR_FMT_RE = compile(r"""(?=(\{([^:]+)(?::([^}]+))?\}))\1""")
 URL_TYPES = {"str": str, "int": int}
 IP_RE = compile(r"(?=(?:(?<=[^0-9])|)((?:[0-9]{,3}\.){3}[0-9]{,3}))\1")
 
-MSG_RE = compile(
-    b"""(?=((?P<hello>^hi\\n\\n$)|^id:\\s(?P<id>[0-9]+:\\d*?)\\ndata:(?P<data>[^$]+)\\n\\n))\\1"""
+MSG_RE_BYTES = compile(
+    b"""(?=((?P<hello>^: hi\\n\\n$)|^id:\\s(?P<id>[0-9]+:\\d*?)\\ndata:(?P<data>[^$]+)\\n\\n))\\1"""
+)
+MSG_RE_TEXT = compile(
+    r"(?=((?P<hello>^: hi\n\n$)|^id:\s(?P<id>[0-9]+:\d*?)\ndata:(?P<data>[^$]+)\n\n))\1"
 )
 TYPE_CACHE = {}
 
-for k in models.__all__:
-    if (
-        k == "Literal"
-        or k.startswith("_")
-        or not issubclass(getattr(models, k), BaseModel)
-    ):
+for k, v in HueEntsV2.__dict__.items():
+    if k.startswith("__") or not issubclass(v, BaseModel):
         continue
-    TYPE_CACHE[getattr(models, k).__fields__["type"].default] = getattr(models, k)
+    TYPE_CACHE[getattr(v, "type")] = v
 
 
 def get_url_args(url):
@@ -122,8 +123,15 @@ class URL(_URL):
 def ret_cls(cls):
     def wrapped(fn):
         async def sub_wrap(self, *args, **kwargs):
+            ret = loads(
+                (await fn(self, *args, **kwargs))
+                .content.decode()
+                .rstrip("\\r\\n")
+                .lstrip(" ")
+            )
+
             kwargs.pop("base_uri", None)
-            ret = (await fn(self, *args, **kwargs)).json().get("data", [])
+            ret = ret.get("data", [])
             _rets = []
 
             if isinstance(ret, list):
@@ -142,6 +150,7 @@ def route(method, endpoint) -> Any:
     def wrapped(fn):
         async def sub_wrap(
             self: "SubRouter",
+            *args,
             base_uri=None,
             content: Optional[bytes] = None,
             data: Optional[dict[str, str]] = None,
@@ -154,35 +163,42 @@ def route(method, endpoint) -> Any:
                 headers = kwargs.pop("headers")
             else:
                 headers = None
+
             for param_name, param in signature(fn).parameters.items():
                 if param_name == "self":
                     continue
 
-                if param_name in fn.__annotations__:
-                    anno = fn.__annotations__[param_name]
-                    if isinstance(anno, type):
-                        type_ = anno
-                    elif anno._name == "Optional":
-                        if hasattr(anno.__args__[0], "_name"):
-                            type_ = str
+                if param.kind == Parameter.POSITIONAL_ONLY:
+                    data[param_name] = param.annotation(args[0])
+                    if len(args) > 1:
+                        args = args[1:]
+
+                else:
+                    if param_name in fn.__annotations__:
+                        anno = fn.__annotations__[param_name]
+                        if isinstance(anno, type):
+                            type_ = anno
+                        elif anno._name == "Optional":
+                            if hasattr(anno.__args__[0], "_name"):
+                                type_ = str
+                            else:
+                                type_ = anno.__args__[0]
                         else:
-                            type_ = anno.__args__[0]
+                            type_ = fn.__annotations__[param_name]
                     else:
-                        type_ = fn.__annotations__[param_name]
-                else:
-                    type_ = str
+                        type_ = str
 
-                if param.default is param.empty:
-                    if param_name not in kwargs and param_name not in data:
-                        raise TypeError(
-                            f"Missing required argument {param_name} for {fn.__name__}"
-                        )
-                    if param_name in kwargs:
-                        data[param_name] = type_(kwargs.pop(param_name))
+                    if param.default is param.empty:
+                        if param_name not in kwargs and param_name not in data:
+                            raise TypeError(
+                                f"Missing required argument {param_name} for {fn.__name__}"
+                            )
+                        if param_name in kwargs:
+                            data[param_name] = type_(kwargs.pop(param_name))
 
-                else:
-                    if kwargs.get(param_name, None):
-                        data[param_name] = type_(kwargs.pop(param_name))
+                    else:
+                        if v := kwargs.pop(param_name, param.default):
+                            data[param_name] = type_(v)
 
             url_args = get_url_args(endpoint)
             for k, v in url_args.items():
@@ -251,10 +267,19 @@ class RouterMeta(type):
 
             return wrap
 
-        if any(map(lambda x: not x.startswith("__"), kwds.keys())):
+        if any(
+            map(
+                lambda x: not x.startswith("__") and not x.startswith("on_"),
+                kwds.keys(),
+            )
+        ):
             funcs = list(
                 filter(
-                    lambda k: not k[0].startswith("__") and callable(k[1]), kwds.items()
+                    lambda k: (
+                        (not k[0].startswith("__") and not k[0].startswith("on_"))
+                        and callable(k[1])
+                    ),
+                    kwds.items(),
                 )
             )
             for k, v in funcs:
@@ -305,20 +330,24 @@ class SubRouter(metaclass=RouterMeta):
             cls._api_path = f'{kwargs.get("root")}{cls.BASE_URI}'
 
 
-class HughApi(SubRouter):
+class HueAPIv1(SubRouter):
+    BASE_URL = ""
+
+
+class HueAPIv2(SubRouter):
     BASE_URI = "/clip/v2"
 
-    @ret_cls(models.Light)
+    @ret_cls(HueEntsV2.Light)
     @route("GET", "/resource/light")
     async def get_lights(self, friendly_name: Optional[str] = None):
         ...
 
-    @ret_cls(models.Light)
+    @ret_cls(HueEntsV2.Light)
     @route("GET", "/resource/light/{light_id}")
-    async def get_light(self, light_id: str):
+    async def get_light(self, light_id: str, /):
         ...
 
-    @ret_cls(models.Identifier)
+    @ret_cls(models.Attributes.Identifier)
     @route("PUT", "/resource/light/{light_id}")
     async def set_light(
         self,
@@ -337,400 +366,402 @@ class HughApi(SubRouter):
     ):
         ...
 
-    @ret_cls(models.Scene)
+    @ret_cls(HueEntsV2.Scene)
     @route("GET", "/resource/scene")
     async def get_scenes(self):
         ...
 
-    @ret_cls(models.Identifier)
+    @ret_cls(models.Attributes.Identifier)
     @route("POST", "/resource/scene")
     async def create_scene(self, **kwargs):
         ...
 
-    @ret_cls(models.Scene)
+    @ret_cls(HueEntsV2.Scene)
     @route("GET", "/resource/scene/{scene_id}")
-    async def get_scene(self, scene_id: UUID):
+    async def get_scene(self, scene_id: UUID, /):
         ...
 
-    @ret_cls(models.Identifier)
+    @ret_cls(models.Attributes.Identifier)
     @route("PUT", "/resource/scene/{scene_id}")
-    async def set_scene(self, scene_id: UUID, **kwargs):
+    async def set_scene(self, scene_id: UUID, /, **kwargs):
         ...
 
-    @ret_cls(models.Identifier)
+    @ret_cls(models.Attributes.Identifier)
     @route("DELETE", "/resource/scene/{scene_id}")
-    async def delete_scene(self, scene_id: UUID):
+    async def delete_scene(self, scene_id: UUID, /):
         ...
 
-    @ret_cls(models.Room)
+    @ret_cls(HueEntsV2.Room)
     @route("GET", "/resource/room")
     async def get_rooms(self):
         ...
 
-    @ret_cls(models.Identifier)
+    @ret_cls(models.Attributes.Identifier)
     @route("POST", "/resource/room")
     async def create_room(self, **kwargs):
         ...
 
-    @ret_cls(models.Room)
+    @ret_cls(HueEntsV2.Room)
     @route("GET", "/resource/room/{room_id}")
-    async def get_room(self, room_id: UUID):
+    async def get_room(self, room_id: UUID, /):
         ...
 
-    @ret_cls(models.Identifier)
+    @ret_cls(models.Attributes.Identifier)
     @route("PUT", "/resource/room/{room_id}")
     async def set_room(
         self,
         room_id: UUID,
+        /,
         metadata: Optional[dict[str, str]] = None,
-        children: Optional[models.Identifier] = None,
+        children: Optional[models.Attributes.Identifier] = None,
     ):
         ...
 
-    @ret_cls(models.Identifier)
+    @ret_cls(models.Attributes.Identifier)
     @route("DELETE", "/resource/room/{room_id}")
     async def delete_room(self, room_id: UUID):
         ...
 
-    @ret_cls(models.Zone)
+    @ret_cls(HueEntsV2.Zone)
     @route("GET", "/resource/zone")
     async def get_zones(self):
         ...
 
-    @ret_cls(models.Identifier)
+    @ret_cls(models.Attributes.Identifier)
     @route("POST", "/resource/zone")
     async def create_zone(self, **kwargs):
         ...
 
-    @ret_cls(models.Zone)
+    @ret_cls(HueEntsV2.Zone)
     @route("GET", "/resource/zone/{zone_id}")
-    async def get_zone(self, zone_id: UUID):
+    async def get_zone(self, zone_id: UUID, /):
         ...
 
-    @ret_cls(models.Identifier)
+    @ret_cls(models.Attributes.Identifier)
     @route("PUT", "/resource/zone/{zone_id}")
-    async def set_zone(self, zone_id: UUID, **kwargs):
+    async def set_zone(self, zone_id: UUID, /, **kwargs):
         ...
 
-    @ret_cls(models.Identifier)
+    @ret_cls(models.Attributes.Identifier)
     @route("DELETE", "/resource/zone/{zone_id}")
-    async def delete_zone(self, zone_id: UUID):
+    async def delete_zone(self, zone_id: UUID, /):
         ...
 
-    @ret_cls(models.BridgeHome)
+    @ret_cls(HueEntsV2.BridgeHome)
     @route("GET", "/resource/bridge_home")
     async def get_bridge_homes(self):
         ...
 
-    @ret_cls(models.BridgeHome)
+    @ret_cls(HueEntsV2.BridgeHome)
     @route("GET", "/resource/bridge_home/{bridge_home_id}")
-    async def get_bridge_home(self, bridge_home_id: UUID):
+    async def get_bridge_home(self, bridge_home_id: UUID, /):
         ...
 
-    @ret_cls(models.Identifier)
+    @ret_cls(models.Attributes.Identifier)
     @route("PUT", "/resource/bridge_home/{bridge_home_id}")
-    async def set_bridge_home(self, bridge_home_id: UUID, **kwargs):
+    async def set_bridge_home(self, bridge_home_id: UUID, /, **kwargs):
         ...
 
-    @ret_cls(models.GroupedLight)
+    @ret_cls(HueEntsV2.GroupedLight)
     @route("GET", "/resource/grouped_light")
     async def get_grouped_lights(self):
         ...
 
-    @ret_cls(models.GroupedLight)
+    @ret_cls(HueEntsV2.GroupedLight)
     @route("GET", "/resource/grouped_light/{grouped_light_id}")
-    async def get_grouped_light(self, grouped_light_id: UUID):
+    async def get_grouped_light(self, grouped_light_id: UUID, /):
         ...
 
-    @ret_cls(models.Identifier)
+    @ret_cls(models.Attributes.Identifier)
     @route("PUT", "/resource/grouped_light/{grouped_light_id}")
-    async def set_grouped_light(self, grouped_light_id: UUID, **kwargs):
+    async def set_grouped_light(self, grouped_light_id: UUID, /, **kwargs):
         ...
 
-    @ret_cls(models.Device)
+    @ret_cls(HueEntsV2.Device)
     @route("GET", "/resource/device")
     async def get_devices(self):
         ...
 
-    @ret_cls(models.Device)
+    @ret_cls(HueEntsV2.Device)
     @route("GET", "/resource/device/{device_id}")
-    async def get_device(self, device_id: UUID):
+    async def get_device(self, device_id: UUID, /):
         ...
 
-    @ret_cls(models.Identifier)
+    @ret_cls(models.Attributes.Identifier)
     @route("PUT", "/resource/device/{device_id}")
-    async def set_device(self, device_id: UUID, **kwargs):
+    async def set_device(self, device_id: UUID, /, **kwargs):
         ...
 
-    @ret_cls(models.Bridge)
+    @ret_cls(HueEntsV2.Bridge)
     @route("GET", "/resource/bridges")
     async def get_bridges(self):
         ...
 
-    @ret_cls(models.Bridge)
+    @ret_cls(HueEntsV2.Bridge)
     @route("GET", "/resource/bridges/{bridge_id}")
-    async def get_bridge(self, bridge_id: UUID):
+    async def get_bridge(self, bridge_id: UUID, /):
         ...
 
-    @ret_cls(models.Identifier)
+    @ret_cls(models.Attributes.Identifier)
     @route("PUT", "/resource/bridges/{bridge_id}")
-    async def set_bridge(self, bridge_id: UUID, **kwargs):
+    async def set_bridge(self, bridge_id: UUID, /, **kwargs):
         ...
 
-    @ret_cls(models.DevicePower)
+    @ret_cls(HueEntsV2.DevicePower)
     @route("GET", "/resource/device_power")
     async def get_device_powers(self):
         ...
 
-    @ret_cls(models.DevicePower)
+    @ret_cls(HueEntsV2.DevicePower)
     @route("GET", "/resource/device_power/{device_power_id}")
-    async def get_device_power(self, device_power_id: UUID):
+    async def get_device_power(self, device_power_id: UUID, /):
         ...
 
-    @ret_cls(models.Identifier)
+    @ret_cls(models.Attributes.Identifier)
     @route("PUT", "/resource/device_power/{device_power_id}")
-    async def set_device_power(self, device_power_id: UUID, **kwargs):
+    async def set_device_power(self, device_power_id: UUID, /, **kwargs):
         ...
 
-    @ret_cls(models.ZigbeeConnectivity)
+    @ret_cls(HueEntsV2.ZigbeeConnectivity)
     @route("GET", "/resource/zigbee_connectivity")
     async def get_zigbee_connectivities(self):
         ...
 
-    @ret_cls(models.ZigbeeConnectivity)
+    @ret_cls(HueEntsV2.ZigbeeConnectivity)
     @route("GET", "/resource/zigbee_connectivity/{zigbee_connectivity_id}")
-    async def get_zigbee_connectivity(self, zigbee_connectivity_id: UUID):
+    async def get_zigbee_connectivity(self, zigbee_connectivity_id: UUID, /):
         ...
 
-    @ret_cls(models.Identifier)
+    @ret_cls(models.Attributes.Identifier)
     @route("PUT", "/resource/zigbee_connectivity/{zigbee_connectivity_id}")
-    async def set_zigbee_connectivity(self, zigbee_connectivity_id: UUID, **kwargs):
+    async def set_zigbee_connectivity(self, zigbee_connectivity_id: UUID, /, **kwargs):
         ...
 
-    @ret_cls(models.ZGPConnectivity)
+    @ret_cls(HueEntsV2.ZGPConnectivity)
     @route("GET", "/resource/zgb_connectivity")
     async def get_zgb_connectivities(self):
         ...
 
-    @ret_cls(models.ZGPConnectivity)
+    @ret_cls(HueEntsV2.ZGPConnectivity)
     @route("GET", "/resource/zgb_connectivity/{zgb_connectivity_id}")
-    async def get_zgb_connectivity(self, zgb_connectivity_id: UUID):
+    async def get_zgb_connectivity(self, zgb_connectivity_id: UUID, /):
         ...
 
-    @ret_cls(models.Identifier)
+    @ret_cls(models.Attributes.Identifier)
     @route("PUT", "/resource/zgb_connectivity/{zgb_connectivity_id}")
-    async def set_zgb_connectivity(self, zgb_connectivity_id: UUID, **kwargs):
+    async def set_zgb_connectivity(self, zgb_connectivity_id: UUID, /, **kwargs):
         ...
 
-    @ret_cls(models.Motion)
+    @ret_cls(HueEntsV2.Motion)
     @route("GET", "/resource/motion")
     async def get_motions(self):
         ...
 
-    @ret_cls(models.Motion)
+    @ret_cls(HueEntsV2.Motion)
     @route("GET", "/resource/motion/{motion_id}")
-    async def get_motion(self, motion_id: UUID):
+    async def get_motion(self, motion_id: UUID, /):
         ...
 
-    @ret_cls(models.Identifier)
+    @ret_cls(models.Attributes.Identifier)
     @route("PUT", "/resource/motion/{motion_id}")
-    async def set_motion(self, motion_id: UUID, **kwargs):
+    async def set_motion(self, motion_id: UUID, /, **kwargs):
         ...
 
-    @ret_cls(models.Temperature)
+    @ret_cls(HueEntsV2.Temperature)
     @route("GET", "/resource/temperature")
     async def get_temperatures(self):
         ...
 
-    @ret_cls(models.Temperature)
+    @ret_cls(HueEntsV2.Temperature)
     @route("GET", "/resource/temperature/{temperature_id}")
-    async def get_temperature(self, temperature_id: UUID):
+    async def get_temperature(self, temperature_id: UUID, /):
         ...
 
-    @ret_cls(models.Identifier)
+    @ret_cls(models.Attributes.Identifier)
     @route("PUT", "/resource/temperature/{temperature_id}")
-    async def set_temperature(self, temperature_id: UUID, **kwargs):
+    async def set_temperature(self, temperature_id: UUID, /, **kwargs):
         ...
 
-    @ret_cls(models.LightLevel)
+    @ret_cls(HueEntsV2.LightLevel)
     @route("GET", "/resource/light_level")
     async def get_light_levels(self):
         ...
 
-    @ret_cls(models.LightLevel)
+    @ret_cls(HueEntsV2.LightLevel)
     @route("GET", "/resource/light_level/{light_level_id}")
-    async def get_light_level(self, light_level_id: UUID):
+    async def get_light_level(self, light_level_id: UUID, /):
         ...
 
-    @ret_cls(models.Identifier)
+    @ret_cls(models.Attributes.Identifier)
     @route("PUT", "/resource/light_level/{light_level_id}")
-    async def set_light_level(self, light_level_id: UUID, **kwargs):
+    async def set_light_level(self, light_level_id: UUID, /, **kwargs):
         ...
 
-    @ret_cls(models.Button)
+    @ret_cls(HueEntsV2.Button)
     @route("GET", "/resource/button")
     async def get_buttons(self):
         ...
 
-    @ret_cls(models.Button)
+    @ret_cls(HueEntsV2.Button)
     @route("GET", "/resource/button/{button_id}")
-    async def get_button(self, button_id: UUID):
+    async def get_button(self, button_id: UUID, /):
         ...
 
-    @ret_cls(models.Identifier)
+    @ret_cls(models.Attributes.Identifier)
     @route("PUT", "/resource/button/{button_id}")
-    async def set_button(self, button_id: UUID, **kwargs):
+    async def set_button(self, button_id: UUID, /, **kwargs):
         ...
 
-    @ret_cls(models.BehaviorScript)
+    @ret_cls(HueEntsV2.BehaviorScript)
     @route("GET", "/resource/behavior_script")
     async def get_behavior_scripts(self):
         ...
 
-    @ret_cls(models.BehaviorScript)
+    @ret_cls(HueEntsV2.BehaviorScript)
     @route("GET", "/resource/behavior_script/{behavior_script_id}")
-    async def get_behavior_script(self, behavior_script_id: UUID):
+    async def get_behavior_script(self, behavior_script_id: UUID, /):
         ...
 
-    @ret_cls(models.BehaviorInstance)
+    @ret_cls(HueEntsV2.BehaviorInstance)
     @route("GET", "/resource/behavior_instance")
     async def get_behavior_instances(self):
         ...
 
-    @ret_cls(models.Identifier)
+    @ret_cls(models.Attributes.Identifier)
     @route("POST", "/resource/behavior_instance")
     async def create_behavior_instance(self, **kwargs):
         ...
 
-    @ret_cls(models.BehaviorInstance)
+    @ret_cls(HueEntsV2.BehaviorInstance)
     @route("GET", "/resource/behavior_instance/{behavior_instance_id}")
-    async def get_behavior_instance(self, behavior_instance_id: UUID):
+    async def get_behavior_instance(self, behavior_instance_id: UUID, /):
         ...
 
-    @ret_cls(models.Identifier)
+    @ret_cls(models.Attributes.Identifier)
     @route("PUT", "/resource/behavior_instance/{behavior_instance_id}")
-    async def set_behavior_instance(self, behavior_instance_id: UUID, **kwargs):
+    async def set_behavior_instance(self, behavior_instance_id: UUID, /, **kwargs):
         ...
 
-    @ret_cls(models.Identifier)
+    @ret_cls(models.Attributes.Identifier)
     @route("DELETE", "/resource/behavior_instance/{behavior_instance_id}")
-    async def delete_behavior_instance(self, behavior_instance_id: UUID):
+    async def delete_behavior_instance(self, behavior_instance_id: UUID, /):
         ...
 
-    @ret_cls(models.GeofenceClient)
+    @ret_cls(HueEntsV2.GeofenceClient)
     @route("GET", "/resource/geofence_client")
     async def get_geofence_clients(self):
         ...
 
-    @ret_cls(models.Identifier)
+    @ret_cls(models.Attributes.Identifier)
     @route("POST", "/resource/geofence_client")
     async def create_geofence_client(self, **kwargs):
         ...
 
-    @ret_cls(models.GeofenceClient)
+    @ret_cls(HueEntsV2.GeofenceClient)
     @route("GET", "/resource/geofence_client/{geofence_client_id}")
-    async def get_geofence_client(self, geofence_client_id: UUID):
+    async def get_geofence_client(self, geofence_client_id: UUID, /):
         ...
 
-    @ret_cls(models.Identifier)
+    @ret_cls(models.Attributes.Identifier)
     @route("PUT", "/resource/geofence_client/{geofence_client_id}")
-    async def set_geofence_client(self, geofence_client_id: UUID, **kwargs):
+    async def set_geofence_client(self, geofence_client_id: UUID, /, **kwargs):
         ...
 
-    @ret_cls(models.Identifier)
+    @ret_cls(models.Attributes.Identifier)
     @route("DELETE", "/resource/geofence_client/{geofence_client_id}")
-    async def delete_geofence_client(self, geofence_client_id: UUID):
+    async def delete_geofence_client(self, geofence_client_id: UUID, /):
         ...
 
-    @ret_cls(models.Geolocation)
+    @ret_cls(HueEntsV2.Geolocation)
     @route("GET", "/resource/geolocation")
     async def get_geolocations(self):
         ...
 
-    @ret_cls(models.Geolocation)
+    @ret_cls(HueEntsV2.Geolocation)
     @route("GET", "/resource/geolocation/{geolocation_id}")
-    async def get_geolocation(self, geolocation_id: UUID):
+    async def get_geolocation(self, geolocation_id: UUID, /):
         ...
 
-    @ret_cls(models.Identifier)
+    @ret_cls(models.Attributes.Identifier)
     @route("PUT", "/resource/geolocation/{geolocation_id}")
-    async def set_geolocation(self, geolocation_id: UUID, **kwargs):
+    async def set_geolocation(self, geolocation_id: UUID, /, **kwargs):
         ...
 
-    @ret_cls(models.EntertainmentConfiguration)
+    @ret_cls(HueEntsV2.EntertainmentConfiguration)
     @route("GET", "/resource/entertainment_configuration")
     async def get_entertainment_configurations(self):
         ...
 
-    @ret_cls(models.Identifier)
+    @ret_cls(models.Attributes.Identifier)
     @route("POST", "/resource/entertainment_configuration")
     async def create_entertainment_configuration(self, **kwargs):
         ...
 
-    @ret_cls(models.EntertainmentConfiguration)
+    @ret_cls(HueEntsV2.EntertainmentConfiguration)
     @route(
         "GET", "/resource/entertainment_configuration/{entertainment_configuration_id}"
     )
     async def get_entertainment_configuration(
-        self, entertainment_configuration_id: UUID
+        self, entertainment_configuration_id: UUID, /
     ):
         ...
 
-    @ret_cls(models.Identifier)
+    @ret_cls(models.Attributes.Identifier)
     @route(
         "PUT", "/resource/entertainment_configuration/{entertainment_configuration_id}"
     )
     async def set_entertainment_configuration(
-        self, entertainment_configuration_id: UUID, **kwargs
+        self, entertainment_configuration_id: UUID, /, **kwargs
     ):
         ...
 
-    @ret_cls(models.Identifier)
+    @ret_cls(models.Attributes.Identifier)
     @route(
         "DELETE",
         "/resource/entertainment_configuration/{entertainment_configuration_id}",
     )
     async def delete_entertainment_configuration(
-        self, entertainment_configuration_id: UUID
+        self, entertainment_configuration_id: UUID, /
     ):
         ...
 
-    @ret_cls(models.Entertainment)
+    @ret_cls(HueEntsV2.Entertainment)
     @route("GET", "/resource/entertainment")
     async def get_entertainments(self):
         ...
 
-    @ret_cls(models.Entertainment)
+    @ret_cls(HueEntsV2.Entertainment)
     @route("GET", "/resource/entertainment/{entertainment_id}")
-    async def get_entertainment(self, entertainment_id: UUID):
+    async def get_entertainment(self, entertainment_id: UUID, /):
         ...
 
-    @ret_cls(models.Identifier)
+    @ret_cls(models.Attributes.Identifier)
     @route("PUT", "/resource/entertainment/{entertainment_id}")
-    async def set_entertainment(self, entertainment_id: UUID, **kwargs):
+    async def set_entertainment(self, entertainment_id: UUID, /, **kwargs):
         ...
 
-    @ret_cls(models.Homekit)
+    @ret_cls(HueEntsV2.Homekit)
     @route("GET", "/resource/homekit")
     async def get_homekits(self):
         ...
 
-    @ret_cls(models.Homekit)
+    @ret_cls(HueEntsV2.Homekit)
     @route("GET", "/resource/homekit/{homekit_id}")
-    async def get_homekit(self, homekit_id: UUID):
+    async def get_homekit(self, homekit_id: UUID, /):
         ...
 
-    @ret_cls(models.Identifier)
+    @ret_cls(models.Attributes.Identifier)
     @route("PUT", "/resource/homekit/{homekit_id}")
     async def set_homekit(
         self,
         homekit_id: UUID,
+        /,
         type: Optional[str] = None,
         action: Optional[Literal["homekit_reset"]] = None,
     ):
         ...
 
-    @ret_cls(models.Resource)
+    @ret_cls(HueEntsV2.Resource)
     @route("GET", "/resource")
     async def get_resources(self):
         ...
@@ -739,8 +770,33 @@ class HughApi(SubRouter):
     async def listen_events(self):
         ...
 
+    @ret_cls(HueEntsV2.RelativeRotary)
+    @route("GET", "/resource/relative_rotary")
+    async def get_rotaries(self):
+        ...
 
-class Router(HughApi):
+    @ret_cls(models.Attributes.Identifier)
+    @route("PUT", "/resource/relative_rotary/{relative_rotary_id}")
+    async def set_rotary(self, relative_rotary_id: UUID, /, **kwargs):
+        ...
+
+    @ret_cls(HueEntsV2.RelativeRotary)
+    @route("GET", "/resource/relative_rotary/{relative_rotary_id}")
+    async def get_rotary(self, relative_rotary_id: UUID, /):
+        ...
+
+    @ret_cls(models.Attributes.Identifier)
+    @route("POST", "/resource/relative_rotary")
+    async def create_rotary(self, **kwargs):
+        ...
+
+    @ret_cls(models.Attributes.Identifier)
+    @route("DELETE", "/resource/relative_rotary/{relative_rotary_id}")
+    async def delete_rotary(self, relative_rotary_id: UUID, /):
+        ...
+
+
+class Router(HueAPIv2):
     def __new__(cls, hue_api_key: str, bridge_ip: str = "", max_cache_size: int = 512):
         cls = super().__new__(cls, hue_api_key)
         return cls
@@ -763,13 +819,13 @@ class Router(HughApi):
         stream = await self.listen_events(
             headers={"Accept": "text/event-stream"} | self._headers
         )
+        resp = await stream.gen.__anext__()
+        _bound = resp.stream
         while get_running_loop().is_running():
-            resp = await stream.gen.__anext__()
-            _bound = resp.stream._stream._httpcore_stream
             try:
                 async for msg in _bound:
                     payload = []
-                    _match = MSG_RE.search(msg)
+                    _match = MSG_RE_BYTES.search(msg)
                     id_ = ""
                     if _match:
                         if _match.groupdict().get("hello", None):
@@ -781,11 +837,101 @@ class Router(HughApi):
 
                     for event in payload:
                         for ob in event["data"]:
-                            self.cache.add(TYPE_CACHE[ob["type"]](**ob))
+                            _obj = TYPE_CACHE[ob["type"]](**ob)
+                            self.cache.add(_obj)
 
-                    print(len(self.cache))
+                            if hasattr(self, f"on_{ob['type']}_{event['type']}"):
+                                await getattr(self, f"on_{ob['type']}_{event['type']}")(
+                                    _obj
+                                )
 
-            except ReadTimeout:
+            except (ReadTimeout, HTTPxReadTimeout) as e:
                 stream = await self.listen_events(
                     headers={"Accept": "text/event-stream"} | self._headers
                 )
+                resp = await stream.gen.__anext__()
+                _bound = resp.stream
+
+    async def on_motion_update(self, motion: HueEntsV2.Motion):
+        print(f"on_motion_update: {motion}")
+
+    async def on_button_update(self, button: HueEntsV2.Button):
+        print(f"on_button_update: {button}")
+
+    async def on_zone_update(self, zone: HueEntsV2.Zone):
+        print(f"on_zone_update: {zone}")
+
+    async def on_zigbee_connectivity_update(self, zigbee: HueEntsV2.ZigbeeConnectivity):
+        print(f"on_zigbee_connectivity_update: {zigbee}")
+
+    async def on_zgp_connectivity_update(
+        self, zgp_connectivity: HueEntsV2.ZGPConnectivity
+    ):
+        print(f"on_zgp_connectivity_update: {zgp_connectivity}")
+
+    async def on_temperature_update(self, temperature: HueEntsV2.Temperature):
+        print(f"on_temperature_update: {temperature}")
+
+    async def on_scene_update(self, scene: HueEntsV2.Scene):
+        print(f"on_scene_update: {scene}")
+
+    async def on_room_update(self, room: HueEntsV2.Room):
+        print(f"on_room_update: {room}")
+
+    async def on_resource_update(self, device: HueEntsV2.Resource):
+        print(f"on_device_update: {device}")
+
+    async def on_relative_rotary_update(
+        self, relative_rotary: HueEntsV2.RelativeRotary
+    ):
+        print(f"on_relative_rotary_update: {relative_rotary}")
+
+    async def on_light_level_update(self, light_level: HueEntsV2.LightLevel):
+        print(f"on_light_level_update: {light_level}")
+
+    async def on_light_update(self, light: HueEntsV2.Light):
+        print(f"on_light_update: {light}")
+
+    async def on_homekit_update(self, homekit: HueEntsV2.Homekit):
+        print(f"on_homekit_update: {homekit}")
+
+    async def on_grouped_light_update(self, grouped_light: HueEntsV2.GroupedLight):
+        print(f"on_grouped_light_update: {grouped_light}")
+
+    async def on_geolocation_update(self, geolocation: HueEntsV2.Geolocation):
+        print(f"on_geolocation_update: {geolocation}")
+
+    async def on_geofence_client_update(
+        self, geofence_client: HueEntsV2.GeofenceClient
+    ):
+        print(f"on_geofence_client_update: {geofence_client}")
+
+    async def on_entertainment_configuration_update(
+        self, entertainment_configuration: HueEntsV2.EntertainmentConfiguration
+    ):
+        print(f"on_entertainment_configuration_update: {entertainment_configuration}")
+
+    async def on_entertainment_update(self, entertainment: HueEntsV2.Entertainment):
+        print(f"on_entertainment_update: {entertainment}")
+
+    async def on_device_power_update(self, device_power: HueEntsV2.DevicePower):
+        print(f"on_device_power_update: {device_power}")
+
+    async def on_device_update(self, device: HueEntsV2.Device):
+        print(f"on_device_update: {device}")
+
+    async def on_bridge_home_update(self, bridge_home: HueEntsV2.BridgeHome):
+        print(f"on_bridge_home_update: {bridge_home}")
+
+    async def on_bridge_update(self, bridge: HueEntsV2.Bridge):
+        print(f"on_bridge_update: {bridge}")
+
+    async def on_behavior_script_update(
+        self, behavior_script: HueEntsV2.BehaviorScript
+    ):
+        print(f"on_behavior_script_update: {behavior_script}")
+
+    async def on_behavior_instance_update(
+        self, behavior_instance: HueEntsV2.BehaviorInstance
+    ):
+        print(f"on_behavior_instance_update: {behavior_instance}")
