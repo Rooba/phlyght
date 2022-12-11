@@ -5,6 +5,7 @@
 **/poetry.lock
 **/__pycache__
 **/testing
+**/build
+**/*.egg-info
 
-!test.py
 test2.py

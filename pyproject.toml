@@ -1,21 +1,39 @@
+[project]
+name = "phlyght"
+license = {file = "COPYING"}
+description = "An async Python library for controlling Philips Hue lights."
+authors = [{name = "", email = "ra@tcp.direct"}]
+keywords = ["philips", "hue", "lights", "async", "asyncio", "python3"]
+dependencies = [
+    "httpx>=0.23.1",
+    "pydantic>=1.10.0",
+    "yarl>=1.8.0",
+    "ujson>=5.0.0",
+    "rich>=12.6.0",
+]
+version = "1.0.0"
+
+[tool.setuptools.packages.find]
+include = ["phlyght"]
+
 [tool.poetry]
 name = "lights"
-version = "0.0.1"
-description = "Lights"
+version = "1.0.0"
+description = "An async Python library for controlling Philips Hue lights."
 authors = ["Ra <ra@tcp.direct>"]
 
 [tool.poetry.dependencies]
 python = ">=3.11,<4.0.0"
 httpx = ">=0.23.1"
-pydantic = ">=1.10.2"
-yarl = ">=1.8.1"
-ujson = "^5.5.0"
-loguru = "^0.6.0"
-orjson = "^3.8.2"
+pydantic = ">=1.10.0"
+yarl = ">=1.8.0"
+ujson = ">=5.6.0"
+rich = ">=12.6.0"
+orjson = "^3.8.3"
+uvloop = "^0.17.0"
 
 [tool.poetry.dev-dependencies]
 black = ">=22.10.0"
-rich = ">=12.6.0"
 
 [tool.poetry.group.dev.dependencies]
 pycodestyle = "^2.10.0"
@@ -23,10 +41,9 @@ pylint = "^2.15.7"
 mypy = "^0.991"
 
 [build-system]
-requires = ["poetry-core>=1.0.0"]
-build-backend = "poetry.core.masonry.api"
-
+requires = ["setuptools >= 39.2.0", "wheel", "poetry-core>=1.0.0"]
+build-backend = "setuptools.build_meta"
 
 [tool.flake8]
-ignore = ["W503", "E501", "E203"]
+ignore = ["W503"]
 extras = ["E501", "E203"]
