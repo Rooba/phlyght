@@ -1,25 +1,26 @@
 from typing import (
     Any,
-    Final,
     Literal,
     Optional,
     Type,
     ClassVar,
+    TypeVar,
 )
-from uuid import UUID
+from uuid import UUID as _UUID, uuid4
 from enum import Enum, auto
 
+# from dataclasses import dataclass
 
-from pydantic import BaseModel, Field
+from pydantic import BaseConfig, BaseModel, Field
 from pydantic.dataclasses import dataclass
 
 try:
-    from ujson import loads, dumps
+    from ujson import dumps, loads
 except ImportError:
     try:
-        from orjson import loads, dumps
+        from orjson import dumps, loads
     except ImportError:
-        from json import loads, dumps
+        from json import dumps, loads
 
 _type = type
 
@@ -27,49 +28,37 @@ __all__ = (
     "Entity",
     "Archetype",
     "RoomType",
+    "Attributes",
     "HueEntsV2",
     "HueEntsV1",
-    "Action",
-    "Actions",
-    "Alert",
-    "Button",
-    "Color",
-    "ColorMirekSchema",
-    "ColorPoint",
-    "ColorPointColor",
-    "ColorTemp",
-    "EntChannel",
-    "LightColor",
-    "PaletteColor",
-    "ScenePaletteColorTemp",
-    "Dependee",
-    "Dimming",
-    "DimmingDelta",
-    "Dynamics",
-    "SceneDynamics",
-    "ProductData",
-    "Effects",
-    "EntLocation",
-    "LightEffect",
-    "SceneEffects",
-    "TimedEffects",
-    "RotaryEvent",
-    "Gamut",
-    "Gradient",
-    "Identifier",
-    "LightLevelValue",
-    "ServiceLocation",
-    "Motion",
-    "SegmentManager",
+    "_XY",
 )
 
 # mypy: enable-incomplete-feature=TypeVarTuple
+Ent = TypeVar("Ent", bound="Entity")
+
+
+def config_dumps(obj: Any) -> str:
+    return ret if isinstance(ret := dumps(obj), str) else ret.decode()
+
+
+class HueConfig(BaseConfig):
+    underscore_attrs_are_private = True
+    allow_population_by_field_name = True
+    json_loads = loads
+    json_dumps = config_dumps
+    smart_union = True
+
+
+class UUID(_UUID):
+    def __json__(self):
+        return self.__str__()
 
 
 class Entity(BaseModel):
     __module__ = "phlyght"
     __cache__: ClassVar[dict[str, Type]] = {}
-    id: UUID = Field(
+    id: Optional[UUID] = Field(
         default_factory=lambda: UUID("00000000-0000-0000-0000-000000000000")
     )
     type: ClassVar[str] = "unknown"
@@ -144,6 +133,9 @@ class RoomType(Enum):
     POOL = auto()
     OTHER = auto()
 
+    def __json__(self):
+        return self.value
+
 
 class Archetype(Enum):
     @staticmethod
@@ -190,317 +182,323 @@ class Archetype(Enum):
     HUE_TUBE = auto()
     HUE_SIGNE = auto()
 
-
-class Config:
-    json_dumps = dumps
-    json_loads = loads
-    smart_union = True
+    def __json__(self):
+        return f'"{self.value}"'
 
 
-@dataclass(config=Config)
+_T = TypeVar("_T")
+
+
+@dataclass
 class _XY:
-    x: float = Field(0.0, ge=0.0, le=1.0)
-    y: float = Field(0.0, ge=0.0, le=1.0)
+    x: float
+    y: float
+
+    def __json__(self):
+        return '{"y":' + f'{self.x}, "x": {self.y}' + "}"
 
 
-@dataclass(config=Config)
+@dataclass
 class On:
     on: bool = True
 
-
-@dataclass(config=Config)
-class LightEffect:
-    effect: Literal["fire", "candle", "no_effect"] = "no_effect"
+    def __json__(self):
+        return '{"on": ' + f"{self.on}" + "}"
 
 
 XY = _XY | tuple[float, float]
 
 
-@dataclass(config=Config)
-class Action:
-    on: On = Field(default_factory=On)
-    dimming: "Dimming" = Field(default_factory=lambda: Dimming())
-    color: "ColorPoint" = Field(default_factory=lambda: ColorPoint())
-    color_temperature: "ScenePaletteColorTemp" = Field(
-        default_factory=lambda: ScenePaletteColorTemp()
-    )
-    gradient: "Gradient" = Field(default_factory=lambda: Gradient())
-    effects: "Effects" = Field(default_factory=lambda: Effects())
-    dynamics: "SceneDynamics" = Field(default_factory=lambda: SceneDynamics())
-
-
-@dataclass(config=Config)
-class Actions:
-    target: "Identifier" = Field(default_factory=lambda: Identifier())
-    action: "Action" = Field(default_factory=lambda: Action())
-    dimming: "Dimming" = Field(default_factory=lambda: Dimming())
-    color: "ColorPoint" = Field(default_factory=lambda: ColorPoint())
-
-
-@dataclass(config=Config)
-class Alert:
-    action: Literal["breathe", "unknown"] = "unknown"
-
-
-@dataclass(config=Config)
-class Button:
-    last_event: Literal[
-        "initial_press",
-        "repeat",
-        "short_release",
-        "long_release",
-        "double_short_release",
-        "long_press",
-    ] = "initial_press"
-
-
-@dataclass(config=Config)
-class Color:
-    xy: XY = Field(default_factory=_XY)
-    gamut: "Gamut" = Field(default_factory=lambda: Gamut())
-    gamut_type: Literal["A", "B", "C"] = "A"
-
-
-@dataclass(config=Config)
-class ColorPointColor:
-    color: "ColorPoint" = Field(default_factory=lambda: ColorPoint())
-
-
-@dataclass(config=Config)
-class ColorPoint:
-    xy: XY = Field(default_factory=_XY)
-
-
-@dataclass(config=Config)
-class ColorMirekSchema:
-    mirek_minimum: int = Field(153, ge=153, le=500)
-    mirek_maximum: int = Field(500, ge=153, le=500)
-
-
-@dataclass(config=Config)
-class ColorTemp:
-    mirek: Optional[int] = Field(0, ge=153, le=500)
-    mirek_valid: bool = True
-    mirek_schema: ColorMirekSchema = Field(default_factory=ColorMirekSchema)
-
-
-@dataclass(config=Config)
-class Dependee:
-    type: str = "unknown"
-    target: "Identifier" = Field(default_factory=lambda: Identifier())
-    level: str = "unknown"
-
-
-@dataclass(config=Config)
-class Dimming:
-    brightness: float = Field(1, gt=0, le=100)
-    min_dim_level: float = Field(0, ge=0, le=100)
-
-
-@dataclass(config=Config)
-class DimmingDelta:
-    action: Literal["up", "down", "stop"] = "stop"
-    brightness_delta: float = Field(0, ge=0, le=100)
-
-
-@dataclass(config=Config)
-class Dynamics:
-    status: str = "unknown"
-    status_values: list[str] = Field(default_factory=list)
-    speed: float = Field(0.0, ge=0, le=100)
-    speed_valid: bool = True
-
-
-@dataclass(config=Config)
-class Effects:
-    effect: list[str] = Field(default_factory=list)
-    status_values: list[str] = Field(default_factory=list)
-    status: str = "unknown"
-    effect_values: list[str] = Field(default_factory=list)
-
-
-@dataclass(config=Config)
-class EntChannel:
-    channel_id: int = Field(0, ge=0, le=255)
-    position: "XYZ" = Field(default_factory=lambda: XYZ())
-    members: list["SegmentRef"] = Field(default_factory=list)
-
-
-@dataclass(config=Config)
-class EntLocation:
-    service_location: list["ServiceLocation"] = Field(default_factory=list)
-
-
-@dataclass(config=Config)
-class Gamut:
-    red: XY = Field(default_factory=_XY)
-    green: XY = Field(default_factory=_XY)
-    blue: XY = Field(default_factory=_XY)
-
-
-@dataclass(config=Config)
-class Gradient:
-    points: list[ColorPointColor] = Field(default_factory=list)
-    points_capable: int = Field(1, ge=0, le=255)
-
-
-@dataclass(config=Config)
-class Identifier:
-
-    rid: UUID = Field(
-        default_factory=lambda: UUID("00000000-0000-0000-0000-000000000000")
-    )
-    rtype: str = "unknown"
-
-
-@dataclass(config=Config)
-class LightColor:
-    xy: XY = 0.0, 0.0
-
-
-@dataclass(config=Config)
-class LightLevelValue:
-    light_level: int = Field(0, ge=0, le=100000)
-    light_level_valid: bool = True
-
-
-@dataclass(config=Config)
-class Metadata:
-
-    name: str = "unknown"
-    archetype: Archetype | RoomType = Archetype.UNKNOWN_ARCHETYPE
-    image: Identifier = Field(default_factory=Identifier)
-
-
-@dataclass(config=Config)
-class Motion:
-    motion: bool = False
-    motion_valid: bool = True
-
-
-@dataclass(config=Config)
-class Palette:
-    color: list["PaletteColor"] = Field(default_factory=list)
-    dimming: list["Dimming"] = Field(default_factory=list)
-    color_temperature: list["PaletteTemperature"] = Field(default_factory=list)
-
-
-@dataclass(config=Config)
-class PaletteColor:
-    color: ColorPoint = Field(default_factory=ColorPoint)
-    dimming: Dimming = Field(default_factory=Dimming)
-
-
-@dataclass(config=Config)
-class PaletteTemperature:
-    color_temperature: "ScenePaletteColorTemp" = Field(
-        default_factory=lambda: ScenePaletteColorTemp()
-    )
-    dimming: Dimming = Field(default_factory=Dimming)
-
-
-@dataclass(config=Config)
-class PowerState:
-    battery_state: Literal["normal", "low", "critical"] = "normal"
-    battery_level: float = Field(100.0, le=100.0, ge=0.0)
-
-
-@dataclass(config=Config)
-class ProductData:
-    model_id: str = "unknown"
-    manufacturer_name: str = "unknown"
-    product_name: str = "unknown"
-    product_archetype: Archetype = Archetype.UNKNOWN_ARCHETYPE
-    certified: bool = False
-    software_version: str = Field("0.0.0", regex=r"\d+\.\d+\.\d+")
-    hardware_platform_type: str = "unknown"
-
-
-@dataclass(config=Config)
-class RelativeRotary:
-    last_event: "RotaryEvent" = Field(default_factory=lambda: RotaryEvent())
-
-
-@dataclass(config=Config)
-class RotaryEvent:
-    action: Literal["start", "repeat", "unknown"] = "unknown"
-    rotation: "RotaryRotation" = Field(default_factory=lambda: RotaryRotation())
-
-
-@dataclass(config=Config)
-class RotaryRotation:
-    direction: Literal["clock_wise", "counter_clock_wise"] = "clock_wise"
-    duration: float = Field(0.0, ge=0.0)
-    steps: int = Field(0, ge=0)
-
-
-@dataclass(config=Config)
-class SceneDynamics:
-    duration: int = Field(0, ge=0)
-
-
-@dataclass(config=Config)
-class SceneEffects:
-    effect: Literal["fire", "candle", "no_effect"] = "no_effect"
-
-
-@dataclass(config=Config)
-class ScenePaletteColorTemp:
-    mirek: int = Field(153, ge=153, le=500)
-
-
-@dataclass(config=Config)
-class Segment:
-    start: int = Field(0, ge=0)
-    length: int = Field(1, ge=1)
-
-
-@dataclass(config=Config)
-class SegmentManager:
-    configurable: bool = True
-    max_segments: int = Field(1, ge=1)
-    segments: list["Segment"] = Field(default_factory=list)
-
-
-@dataclass(config=Config)
-class SegmentRef:
-    service: Identifier = Field(default_factory=Identifier)
-    index: int = 0
-
-
-@dataclass(config=Config)
-class ServiceLocation:
-    service: Identifier = Field(default_factory=Identifier)
-    position: "XYZ" = Field(default_factory=lambda: XYZ())
-    positions: list[Type["XYZ"]] = Field(max_items=2, min_items=1)
-
-
-@dataclass(config=Config)
-class StreamProxy:
-    mode: Literal["auto", "manual"] = "manual"
-    node: Identifier = Field(default_factory=Identifier)
-
-
-@dataclass(config=Config)
-class Temp:
-    temperature: float = Field(0.0, lt=100.0, gt=-100.0)
-    temperature_valid: bool = True
-
-
-@dataclass(config=Config)
-class TimedEffects:
-    effect: str = "none"
-    duration: float = Field(0.0, ge=0.0)
-    status_values: list[str] = Field(default_factory=list)
-    status: str = "unknown"
-    effect_values: list[str] = Field(default_factory=list)
-
-
-@dataclass(config=Config)
-class XYZ(BaseModel):
-    x: float = Field(ge=-1.0, le=1.0)
-    y: float = Field(ge=-1.0, le=1.0)
-    z: float = Field(ge=-1.0, le=1.0)
+class Attributes:
+    class Action(BaseModel):
+        on: "Attributes.On" = Field(default_factory=lambda: Attributes.On(on=True))
+        dimming: "Attributes.Dimming" = Field(
+            default_factory=lambda: Attributes.Dimming(
+                brightness=100.0, min_dim_level=100.0
+            )
+        )
+        color: "Attributes.ColorPoint" = Field(
+            default_factory=lambda: Attributes.ColorPoint()
+        )
+        color_temperature: "Attributes.ScenePaletteColorTemp" = Field(
+            default_factory=lambda: Attributes.ScenePaletteColorTemp(mirek=500)
+        )
+        gradient: "Attributes.Gradient" = Field(
+            default_factory=lambda: Attributes.Gradient(points_capable=2, points=[])
+        )
+        effects: "Attributes.Effects" = Field(
+            default_factory=lambda: Attributes.Effects()
+        )
+        dynamics: "Attributes.SceneDynamics" = Field(
+            default_factory=lambda: Attributes.SceneDynamics(duration=1)
+        )
+
+    class Actions(BaseModel):
+        target: "Attributes.Identifier" = Field(...)
+        action: "Attributes.Action" = Field(default_factory=lambda: Attributes.Action())
+        dimming: "Attributes.Dimming" = Field(
+            default_factory=lambda: Attributes.Dimming(
+                brightness=100.0, min_dim_level=100.0
+            )
+        )
+        color: "Attributes.ColorPoint" = Field(
+            default_factory=lambda: Attributes.ColorPoint()
+        )
+
+    class Alert(BaseModel):
+        action: Literal["breathe", "unknown"] = "unknown"
+
+    class Button(BaseModel):
+        last_event: Literal[
+            "initial_press",
+            "repeat",
+            "short_release",
+            "long_release",
+            "double_short_release",
+            "long_press",
+        ] = "initial_press"
+
+    class Color(BaseModel):
+        xy: "Attributes.XY" = Field(default_factory=lambda: Attributes.XY(x=0.0, y=0.0))
+        gamut: "Attributes.Gamut" = Field(default_factory=lambda: Attributes.Gamut())
+        gamut_type: Literal["A", "B", "C"] = "A"
+
+    class ColorPointColor(BaseModel):
+        color: "Attributes.ColorPoint" = Field(
+            default_factory=lambda: Attributes.ColorPoint()
+        )
+
+    class ColorPoint(BaseModel):
+        xy: "Attributes.XY" = Field(default_factory=lambda: Attributes.XY(x=0.0, y=0.0))
+
+    class ColorMirekSchema(BaseModel):
+        mirek_minimum: int = Field(default=153, ge=153, le=500)
+        mirek_maximum: int = Field(default=500, ge=153, le=500)
+
+    class ColorTemp(BaseModel):
+        mirek: Optional[int] = Field(default=0, ge=153, le=500)
+        mirek_valid: Optional[bool] = True
+        mirek_schema: Optional["Attributes.ColorMirekSchema"] = Field(
+            default_factory=lambda: Attributes.ColorMirekSchema()
+        )
+
+    class Dependee(BaseModel):
+        type: str = "unknown"
+        target: "Attributes.Identifier" = Field(...)
+        level: str = "unknown"
+
+    class Dimming(BaseModel):
+        class Config:
+            frozen = True
+            allow_mutation = False
+            validate_assignment = True
+
+        brightness: Optional[float] = Field(default=100, gt=0, le=100)
+        min_dim_level: Optional[float] = Field(default=0, ge=0, le=100)
+
+    class DimmingDelta(BaseModel):
+        action: Optional[Literal["up", "down", "stop"]] = "stop"
+        brightness_delta: Optional[float] = Field(default=0, ge=0, le=100)
+
+    class Dynamics(BaseModel):
+        status: str = "unknown"
+        status_values: Optional[list[str]] = Field(default_factory=list)
+        speed: Optional[float] = Field(default=0.0, ge=0, le=100)
+        speed_valid: Optional[bool] = True
+
+    class Effects(BaseModel):
+        effect: Optional[list[str]] = Field(default_factory=list)
+        status_values: Optional[list[str]] = Field(default_factory=list)
+        status: str = "unknown"
+        effect_values: Optional[list[str]] = Field(default_factory=list)
+
+    class EntChannel(BaseModel):
+        channel_id: int = Field(ge=0, le=255)
+        position: Optional["Attributes.XYZ"] = Field(
+            default_factory=lambda: Attributes.XYZ(x=0.0, y=0.0, z=0.0)
+        )
+        members: list["Attributes.SegmentRef"] = Field(default_factory=list)
+
+    class EntLocation(BaseModel):
+        service_location: list["Attributes.ServiceLocation"] = Field(
+            default_factory=list
+        )
+
+    class Gamut(BaseModel):
+        red: XY = Field(default_factory=lambda: Attributes.XY(x=0.0, y=0.0))
+        green: XY = Field(default_factory=lambda: Attributes.XY(x=0.0, y=0.0))
+        blue: XY = Field(default_factory=lambda: Attributes.XY(x=0.0, y=0.0))
+
+    class Gradient(BaseModel):
+        points: Optional[list["Attributes.ColorPointColor"]] = Field(
+            default_factory=list
+        )
+        points_capable: Optional[int] = Field(default=1, ge=0, le=255)
+
+    class Identifier(BaseModel):
+        class Config:
+            frozen = True
+            allow_mutation = False
+            validate_assignment = True
+
+        rid: UUID = Field(default_factory=uuid4)
+        rtype: str = "unknown"
+
+    class LightColor(BaseModel):
+        xy: Optional[XY] = Field(default_factory=lambda: _XY(x=0.0, y=0.0))
+
+    class LightLevelValue(BaseModel):
+        light_level: Optional[int] = Field(default=0, ge=0, le=100000)
+        light_level_valid: Optional[bool] = True
+
+    class LightEffect(BaseModel):
+        effect: Optional[Literal["fire", "candle", "no_effect"]] = "no_effect"
+
+    class Metadata(BaseModel):
+        class Config:
+            frozen = True
+            allow_mutation = False
+            validate_assignment = True
+
+        name: str = "unknown"
+        archetype: Archetype | RoomType = Archetype.UNKNOWN_ARCHETYPE
+        image: "Attributes.Identifier" = Field(
+            default_factory=lambda: Attributes.Identifier(), repr=False
+        )
+
+    class Motion(BaseModel):
+        motion: Optional[bool] = False
+        motion_valid: Optional[bool] = True
+
+    class On(BaseModel):
+        class Config:
+            frozen = True
+            allow_mutation = False
+            validate_assignment = True
+
+        on: Optional[bool] = Field(default=True, alias="on")
+
+    class Palette(BaseModel):
+        color: Optional[list["Attributes.PaletteColor"]] = Field(default_factory=list)
+        dimming: Optional[list["Attributes.Dimming"]] = Field(default_factory=list)
+        color_temperature: list["Attributes.PaletteTemperature"] = Field(
+            default_factory=list
+        )
+
+    class PaletteColor(BaseModel):
+        color: Optional["Attributes.ColorPoint"] = Field(
+            default_factory=lambda: Attributes.ColorPoint()
+        )
+        dimming: Optional["Attributes.Dimming"] = Field(
+            default_factory=lambda: Attributes.Dimming(
+                brightness=100.0, min_dim_level=100.0
+            )
+        )
+
+    class PaletteTemperature(BaseModel):
+        color_temperature: Optional["Attributes.ScenePaletteColorTemp"] = Field(
+            default_factory=lambda: Attributes.ScenePaletteColorTemp(mirek=500)
+        )
+        dimming: Optional["Attributes.Dimming"] = Field(
+            default_factory=lambda: Attributes.Dimming(
+                brightness=100.0, min_dim_level=100.0
+            )
+        )
+
+    class PowerState(BaseModel):
+        battery_state: Optional[Literal["normal", "low", "critical"]] = "normal"
+        battery_level: Optional[float] = Field(default=100.0, le=100.0, ge=0.0)
+
+    class ProductData(BaseModel):
+        model_id: Optional[str] = "unknown"
+        manufacturer_name: Optional[str] = "unknown"
+        product_name: Optional[str] = "unknown"
+        product_archetype: Optional[Archetype] = Archetype.UNKNOWN_ARCHETYPE
+        certified: Optional[bool] = False
+        software_version: Optional[str] = Field(default="0.0.0", regex=r"\d+\.\d+\.\d+")
+        hardware_platform_type: Optional[str] = "unknown"
+
+    class RelativeRotary(BaseModel):
+        last_event: Optional["Attributes.RotaryEvent"] = Field(
+            default_factory=lambda: Attributes.RotaryEvent()
+        )
+
+    class RotaryEvent(BaseModel):
+        action: Optional[Literal["start", "repeat", "unknown"]] = "unknown"
+        rotation: Optional["Attributes.RotaryRotation"] = Field(
+            default_factory=lambda: Attributes.RotaryRotation(
+                direction="clock_wise", duration=0.0, steps=0
+            )
+        )
+
+    class RotaryRotation(BaseModel):
+        direction: Literal["clock_wise", "counter_clock_wise"] = "clock_wise"
+        duration: Optional[float] = Field(0.0, ge=0.0)
+        steps: Optional[int] = Field(0, ge=0)
+
+    class SceneDynamics(BaseModel):
+        duration: Optional[int] = Field(0, ge=0)
+
+    class SceneEffects(BaseModel):
+        effect: Optional[Literal["fire", "candle", "no_effect"]] = "no_effect"
+
+    class ScenePaletteColorTemp(BaseModel):
+        mirek: int = Field(153, ge=153, le=500)
+
+    class Segment(BaseModel):
+        start: int = Field(0, ge=0)
+        length: int = Field(1, ge=1)
+
+    class SegmentManager(BaseModel):
+        configurable: Optional[bool] = True
+        max_segments: Optional[int] = Field(default=1, ge=1)
+        segments: Optional[list["Attributes.Segment"]] = Field(default_factory=list)
+
+    class SegmentRef(BaseModel):
+        service: "Attributes.Identifier" = Field(
+            default_factory=lambda: Attributes.Identifier()
+        )
+        index: int = 0
+
+    class ServiceLocation(BaseModel):
+        service: "Attributes.Identifier" = Field(
+            default_factory=lambda: Attributes.Identifier()
+        )
+        position: "Attributes.XYZ" = Field(
+            default_factory=lambda: Attributes.XYZ(x=0.0, y=0.0, z=0.0)
+        )
+        positions: list[Type["Attributes.XYZ"]] = Field(max_items=2, min_items=1)
+
+    class StreamProxy(BaseModel):
+        mode: Literal["auto", "manual"] = "manual"
+        node: "Attributes.Identifier" = Field(
+            default_factory=lambda: Attributes.Identifier()
+        )
+
+    class Temp(BaseModel):
+        temperature: float = Field(default=0.0, lt=100.0, gt=-100.0)
+        temperature_valid: bool = True
+
+    class TimedEffects(BaseModel):
+        effect: Optional[str] = "none"
+        duration: Optional[float] = Field(default=0.0, ge=0.0)
+        status_values: Optional[list[str]] = Field(default_factory=list)
+        status: Optional[str] = "unknown"
+        effect_values: Optional[list[str]] = Field(default_factory=list)
+
+    class XY(BaseModel):
+        class Config:
+            frozen = True
+            allow_mutation = False
+            validate_assignment = True
+
+        x: float = Field(0.0, ge=0.0, le=1.0)
+        y: float = Field(0.0, ge=0.0, le=1.0)
+
+    class XYZ(BaseModel):
+        x: float = Field(ge=-1.0, le=1.0)
+        y: float = Field(ge=-1.0, le=1.0)
+        z: float = Field(ge=-1.0, le=1.0)
 
 
 class HueEntsV1:
@@ -515,16 +513,26 @@ class HueEntsV1:
         proxyaddress: str
 
 
+v: BaseModel
+
+for k, v in Attributes.__dict__.items():
+    if k.startswith("__"):
+        continue
+
+    if isinstance(v, type) and issubclass(v, BaseModel):
+        v.update_forward_refs()
+
+
 class HueEntsV2:
     class BehaviorInstance(Entity):
-        type: Final[Literal["behavior_instance"]] = "behavior_instance"
-        id: UUID = UUID("00000000-0000-0000-0000-000000000000")
+        type: ClassVar[str] = "beheavior_instance"
+        id: UUID
         id_v1: str = Field("", regex=r"^(\/[a-z]{4,32}\/[0-9a-zA-Z-]{1,32})?$")
         script_id: str = Field("", regex=r"^[0-9a-f]{8}-([0-9a-f]{4}-){3}[0-9a-f]{12}$")
         enabled: bool = True
         state: dict[str, Any] = Field(default_factory=dict)
         configuration: dict[str, Any] = Field(default_factory=dict)
-        dependees: list[Dependee] = Field(default_factory=list)
+        dependees: list[Attributes.Dependee] = Field(default_factory=list)
         status: Literal[
             "initializing", "running", "disabled", "errored"
         ] = "initializing"
@@ -533,8 +541,8 @@ class HueEntsV2:
         migrated_from: str = "unknown"
 
     class BehaviorScript(Entity):
-        type: Final[Literal["behavior_script"]] = "behavior_script"
-        id: UUID = UUID("00000000-0000-0000-0000-000000000000")
+        type: ClassVar[str] = "behavior_script"
+        id: UUID
         id_v1: str = Field("", regex=r"^(\/[a-z]{4,32}\/[0-9a-zA-Z-]{1,32})?$")
         description: str = ""
         configuration_schema: dict[str, Any] = Field(default_factory=dict)
@@ -544,57 +552,61 @@ class HueEntsV2:
         metadata: dict[str, str] = Field(default_factory=dict)
 
     class Bridge(Entity):
-        type: Final[Literal["bridge"]] = "bridge"
-        id: UUID = UUID("00000000-0000-0000-0000-000000000000")
+        type: ClassVar[str] = "bridge"
+        id: UUID
         id_v1: str = Field("", regex=r"^(\/[a-z]{4,32}\/[0-9a-zA-Z-]{1,32})?$")
         bridge_id: str = ""
         time_zone: dict[str, str] = Field(default_factory=dict)
 
     class BridgeHome(Entity):
-        type: Final[Literal["bridge_home"]] = "bridge_home"
-        id: UUID = UUID("00000000-0000-0000-0000-000000000000")
+        type: ClassVar[str] = "bridge_home"
+        id: UUID
         id_v1: str = Field("", regex=r"^(\/[a-z]{4,32}\/[0-9a-zA-Z-]{1,32})?$")
-        services: list[Identifier] = Field(default_factory=list)
-        children: list[Identifier] = Field(default_factory=list)
+        services: list[Attributes.Identifier] = Field(default_factory=list)
+        children: list[Attributes.Identifier] = Field(default_factory=list)
 
     class Button(Entity):
-        type: Final[Literal["button"]] = "button"
-        id: UUID = UUID("00000000-0000-0000-0000-000000000000")
+        type: ClassVar[str] = "button"
+        id: UUID
         id_v1: str = Field("", regex=r"^(\/[a-z]{4,32}\/[0-9a-zA-Z-]{1,32})?$")
-        owner: Identifier = Identifier()
+        owner: Attributes.Identifier = Field(default_factory=Attributes.Identifier)
         metadata: dict[Literal["control_id"], int] = Field(default_factory=dict)
-        button: Button = Button()
+        button: Attributes.Button = Field(default_factory=Attributes.Button)
 
     class Device(Entity):
-        type: Final[Literal["device"]] = "device"
-        id: UUID = UUID("00000000-0000-0000-0000-000000000000")
+        type: ClassVar[str] = "device"
+        id: UUID
         id_v1: str = Field("", regex=r"^(\/[a-z]{4,32}\/[0-9a-zA-Z-]{1,32})?$")
-        services: list[Identifier] = Field(default_factory=list)
-        metadata: Metadata = Metadata()
-        product_data: ProductData = ProductData()
+        services: list[Attributes.Identifier] = Field(default_factory=list)
+        metadata: Attributes.Metadata = Field(default_factory=Attributes.Metadata)
+        product_data: Attributes.ProductData = Field(
+            default_factory=lambda: Attributes.ProductData()
+        )
 
     class DevicePower(Entity):
-        type: Final[Literal["device_power"]] = "device_power"
-        id: UUID = UUID("00000000-0000-0000-0000-000000000000")
+        type: ClassVar[str] = "device_power"
+        id: UUID
         id_v1: str = Field("", regex=r"^(\/[a-z]{4,32}\/[0-9a-zA-Z-]{1,32})?$")
-        owner: Identifier = Identifier()
-        power_state: PowerState = PowerState()
+        owner: Attributes.Identifier = Field(default_factory=Attributes.Identifier)
+        power_state: Attributes.PowerState = Field(
+            default_factory=Attributes.PowerState
+        )
 
     class Entertainment(Entity):
-        type: Final[Literal["entertainment"]] = "entertainment"
-        id: UUID = UUID("00000000-0000-0000-0000-000000000000")
+        type: ClassVar[str] = "entertainment"
+        id: UUID
         id_v1: str = Field("", regex=r"^(\/[a-z]{4,32}\/[0-9a-zA-Z-]{1,32})?$")
-        owner: Identifier = Identifier()
+        owner: Attributes.Identifier = Field(default_factory=Attributes.Identifier)
         renderer: bool = False
         proxy: bool = False
         max_streams: int = Field(1, ge=1)
-        segments: SegmentManager = SegmentManager()
+        segments: Attributes.SegmentManager = Field(
+            default_factory=Attributes.SegmentManager
+        )
 
     class EntertainmentConfiguration(Entity):
-        type: Final[
-            Literal["entertainment_configuration"]
-        ] = "entertainment_configuration"
-        id: UUID = UUID("00000000-0000-0000-0000-000000000000")
+        type: ClassVar[str] = "entertainment_configuration"
+        id: UUID
         id_v1: str = Field("", regex=r"^(\/[a-z]{4,32}\/[0-9a-zA-Z-]{1,32})?$")
         metadata: dict[Literal["name"], str] = Field(default_factory=dict)
         name: str = ""
@@ -602,120 +614,140 @@ class HueEntsV2:
             Literal["screen", "monitor", "music", "3dspace", "other"]
         ] = "screen"
         status: Literal["active", "inactive"] = "inactive"
-        active_streamer: Identifier = Identifier()
-        stream_proxy: StreamProxy = StreamProxy()
-        channels: list[EntChannel] = Field(default_factory=list)
-        locations: EntLocation = EntLocation()
-        light_services: list[Identifier] = Field(default_factory=list)
+        active_streamer: Attributes.Identifier = Field(
+            default_factory=Attributes.Identifier
+        )
+        stream_proxy: Attributes.StreamProxy = Field(
+            default_factory=Attributes.StreamProxy
+        )
+        channels: list[Attributes.EntChannel] = Field(default_factory=list)
+        locations: Attributes.EntLocation = Field(
+            default_factory=Attributes.EntLocation
+        )
+        light_services: list[Attributes.Identifier] = Field(default_factory=list)
 
     class GeofenceClient(Entity):
-        type: Final[Literal["geofence_client"]] = "geofence_client"
-        id: UUID = UUID("00000000-0000-0000-0000-000000000000")
+        type: ClassVar[str] = "geofence_client"
+        id: UUID
         id_v1: str = Field("", regex=r"^(\/[a-z]{4,32}\/[0-9a-zA-Z-]{1,32})?$")
         name: str = ""
 
     class Geolocation(Entity):
-        type: Final[Literal["geolocation"]] = "geolocation"
-        id: UUID = UUID("00000000-0000-0000-0000-000000000000")
+        type: ClassVar[str] = "geolocation"
+        id: UUID
         id_v1: str = Field("", regex=r"^(\/[a-z]{4,32}\/[0-9a-zA-Z-]{1,32})?$")
         is_configured: bool = False
 
     class GroupedLight(Entity):
-        type: Final[Literal["grouped_light"]] = "grouped_light"
-        id: UUID = UUID("00000000-0000-0000-0000-000000000000")
+        type: ClassVar[str] = "grouped_light"
+        id: UUID
         id_v1: str = Field("", regex=r"^(\/[a-z]{4,32}\/[0-9a-zA-Z-]{1,32})?$")
-        on: On = On()
-        alert: Alert = Alert()
+        on: Attributes.On = Field(default_factory=Attributes.On)
+        alert: Attributes.Alert = Field(default_factory=Attributes.Alert)
 
     class Homekit(Entity):
-        id: UUID = UUID("00000000-0000-0000-0000-000000000000")
-        type: Final[Literal["resource"]] = "resource"
+        id: UUID
+        type: ClassVar[str] = "resource"
         id_v1: str = Field("", regex=r"^(\/[a-z]{4,32}\/[0-9a-zA-Z-]{1,32})?$")
         status: Literal["paired", "pairing", "unpaired"] = "unpaired"
 
     class Light(Entity):
-        id: UUID = UUID("00000000-0000-0000-0000-000000000000")
-        id_v1: str = Field(
-            "", regex=r"^(\/[a-z]{4,32}\/[0-9a-zA-Z-]{1,32})?$", exclude=True
+        # id: UUID
+        id_v1: Optional[str] = Field(
+            default="", regex=r"^(\/[a-z]{4,32}\/[0-9a-zA-Z-]{1,32})?$", exclude=True
         )
-        owner: Identifier = Identifier()
-        metadata: Metadata = Metadata()
+        owner: Attributes.Identifier = Field(default_factory=Attributes.Identifier)
+        metadata: Attributes.Metadata = Field(default_factory=Attributes.Metadata)
 
-        on: On = On()
-        dimming: Dimming = Dimming()
-        dimming_delta: DimmingDelta = DimmingDelta()
-        color_temperature: ColorTemp = ColorTemp()
+        on: Attributes.On = Field(default_factory=Attributes.On)
+        dimming: Attributes.Dimming = Field(default_factory=Attributes.Dimming)
+        dimming_delta: Attributes.DimmingDelta = Field(
+            default_factory=Attributes.DimmingDelta
+        )
+        color_temperature: Attributes.ColorTemp = Field(
+            default_factory=Attributes.ColorTemp
+        )
         color_temperature_delta: dict = Field(default_factory=dict)
-        color: LightColor | dict[Literal["xy"], tuple[float, float]] = LightColor()
-        gradient: Gradient = Gradient()
-        dynamics: Dynamics = Dynamics()
-        alert: Alert = Alert()
+        color: Attributes.LightColor = Field(default_factory=Attributes.LightColor)
+        gradient: Attributes.Gradient = Field(default_factory=Attributes.Gradient)
+        dynamics: Attributes.Dynamics = Field(default_factory=Attributes.Dynamics)
+        alert: Attributes.Alert = Field(default_factory=Attributes.Alert)
         signaling: dict = Field(default_factory=dict)
         mode: Literal["normal", "streaming"] = "normal"
-        effects: LightEffect = LightEffect(effect="fire")
-        timed_effects: TimedEffects = TimedEffects()
-        type: Final[Literal["light"]] = "light"
+        effects: Attributes.LightEffect = Field(
+            default_factory=lambda: Attributes.LightEffect(effect="fire")
+        )
+        timed_effects: Attributes.TimedEffects = Field(
+            default_factory=Attributes.TimedEffects
+        )
+        type: ClassVar[str] = "light"
 
     class LightLevel(Entity):
-        type: Final[Literal["light_level"]] = "light_level"
-        id: UUID = UUID("00000000-0000-0000-0000-000000000000")
+        type: ClassVar[str] = "light_level"
+        id: UUID
         id_v1: str = Field("", regex=r"^(\/[a-z]{4,32}\/[0-9a-zA-Z-]{1,32})?$")
-        owner: Identifier = Identifier()
+        owner: Attributes.Identifier = Field(default_factory=Attributes.Identifier)
         enabled: bool = True
-        light: LightLevelValue = LightLevelValue()
+        light: Attributes.LightLevelValue = Field(
+            default_factory=Attributes.LightLevelValue
+        )
 
     class Motion(Entity):
-        type: Final[Literal["motion"]] = "motion"
-        id: UUID = UUID("00000000-0000-0000-0000-000000000000")
+        type: ClassVar[str] = "motion"
+        id: UUID
         id_v1: str = Field("", regex=r"^(\/[a-z]{4,32}\/[0-9a-zA-Z-]{1,32})?$")
-        owner: Identifier = Identifier()
+        owner: Attributes.Identifier = Field(default_factory=Attributes.Identifier)
         enabled: bool = True
-        motion: Motion = Motion()
+        motion: Attributes.Motion = Field(default_factory=Attributes.Motion)
 
     class RelativeRotary(Entity):
-        id: UUID = UUID("00000000-0000-0000-0000-000000000000")
-        type: Final[Literal["relative_rotary"]] = "relative_rotary"
-        owner: Identifier = Identifier()
+        id: UUID
+        type: ClassVar[str] = "relative_rotary"
+        owner: Attributes.Identifier = Field(default_factory=Attributes.Identifier)
         id_v1: str = Field("", regex=r"^(\/[a-z]{4,32}\/[0-9a-zA-Z-]{1,32})?$")
-        relative_rotary: RelativeRotary = RelativeRotary()
+        relative_rotary: Attributes.RelativeRotary = Field(
+            default_factory=Attributes.RelativeRotary
+        )
 
     class Resource(Entity):
-        id: UUID = UUID("00000000-0000-0000-0000-000000000000")
-        type: Final[Literal["device"]] = "device"
+        id: UUID
+        type: ClassVar[str] = "device"
         id_v1: str = Field("", regex=r"^(\/[a-z]{4,32}\/[0-9a-zA-Z-]{1,32})?$")
 
     class Room(Entity):
-        type: Final[Literal["room"]] = "room"
-        id: UUID = UUID("00000000-0000-0000-0000-000000000000")
+        type: ClassVar[str] = "room"
+        id: UUID
         id_v1: str = Field("", regex=r"^(\/[a-z]{4,32}\/[0-9a-zA-Z-]{1,32})?$")
-        services: list[Identifier] = Field(default_factory=list)
-        metadata: Metadata = Metadata()
-        children: list[Identifier] = Field(default_factory=list)
+        services: list[Attributes.Identifier] = Field(
+            default_factory=list, alias="service"
+        )
+        metadata: Attributes.Metadata = Field(default_factory=Attributes.Metadata)
+        children: list[Attributes.Identifier] = Field(default_factory=list)
 
     class Scene(Entity):
-        id: UUID = UUID("00000000-0000-0000-0000-000000000000")
+        id: UUID
         id_v1: str = Field("", regex=r"^(\/[a-z]{4,32}\/[0-9a-zA-Z-]{1,32})?$")
-        metadata: Metadata = Metadata()
-        group: Identifier = Identifier()
-        actions: list[Actions] = Field(default_factory=list)
-        palette: Palette = Palette()
+        metadata: Attributes.Metadata = Field(default_factory=Attributes.Metadata)
+        group: Attributes.Identifier = Field(default_factory=Attributes.Identifier)
+        actions: list[Attributes.Actions] = Field(default_factory=list)
+        palette: Attributes.Palette = Field(default_factory=Attributes.Palette)
         speed: float = 0.0
         auto_dynamic: bool = False
-        type: Final[Literal["scene"]] = "scene"
+        type: ClassVar[str] = "scene"
 
     class Temperature(Entity):
-        type: Final[Literal["temperature"]] = "temperature"
-        id: UUID = UUID("00000000-0000-0000-0000-000000000000")
+        type: ClassVar[str] = "temperature"
+        id: UUID
         id_v1: str = Field("", regex=r"^(\/[a-z]{4,32}\/[0-9a-zA-Z-]{1,32})?$")
-        owner: Identifier = Identifier()
+        owner: Attributes.Identifier = Field(default_factory=Attributes.Identifier)
         enabled: bool = True
-        temperature: Temp = Temp()
+        temperature: Attributes.Temp = Field(default_factory=Attributes.Temp)
 
     class ZGPConnectivity(Entity):
-        type: Final[Literal["zgp_connectivity"]] = "zgp_connectivity"
-        id: UUID = UUID("00000000-0000-0000-0000-000000000000")
+        type: ClassVar[str] = "zgp_connectivity"
+        id: UUID
         id_v1: str = Field("", regex=r"^(\/[a-z]{4,32}\/[0-9a-zA-Z-]{1,32})?$")
-        owner: Identifier = Identifier()
+        owner: Attributes.Identifier = Field(default_factory=Attributes.Identifier)
         status: Optional[
             Literal[
                 "connected",
@@ -727,10 +759,10 @@ class HueEntsV2:
         source_id: str = ""
 
     class ZigbeeConnectivity(Entity):
-        type: Final[Literal["zigbee_connectivity"]] = "zigbee_connectivity"
-        id: UUID = UUID("00000000-0000-0000-0000-000000000000")
+        type: ClassVar[str] = "zigbee_connectivity"
+        id: UUID
         id_v1: str = Field("", regex=r"^(\/[a-z]{4,32}\/[0-9a-zA-Z-]{1,32})?$")
-        owner: Identifier = Identifier()
+        owner: Attributes.Identifier = Field(default_factory=Attributes.Identifier)
         status: Optional[
             Literal[
                 "connected",
@@ -742,17 +774,18 @@ class HueEntsV2:
         mac_address: str = Field("", regex=r"^(?:[0-9a-fA-F]{2}(?:-|:)?){6}$")
 
     class Zone(Entity):
-        type: Final[Literal["zone"]] = "zone"
-        id: UUID = UUID("00000000-0000-0000-0000-000000000000")
+        type: ClassVar[str] = "zone"
+        id: UUID
         id_v1: str = Field("", regex=r"^(\/[a-z]{4,32}\/[0-9a-zA-Z-]{1,32})?$")
-        services: list[Identifier] = Field(default_factory=list)
-        metadata: Metadata = Metadata()
-        children: list[Identifier] = Field(default_factory=list)
+        services: list[Attributes.Identifier] = Field(
+            default_factory=list, alias="service"
+        )
+        metadata: Attributes.Metadata = Field(default_factory=Attributes.Metadata)
+        children: list[Attributes.Identifier] = Field(default_factory=list)
 
 
 for k, v in HueEntsV2.__dict__.items():
     if k.startswith("__"):
         continue
-
     if isinstance(v, type) and issubclass(v, BaseModel):
         v.update_forward_refs()
