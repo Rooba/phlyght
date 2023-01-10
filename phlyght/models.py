@@ -1,3 +1,4 @@
+from types import new_class
 from typing import (
     Any,
     Literal,
@@ -7,12 +8,15 @@ from typing import (
     TypeVar,
 )
 from uuid import UUID as _UUID, uuid4
+from typing import TypeVar, Generic
 from enum import Enum, auto
-
-# from dataclasses import dataclass
+from httpx import AsyncClient
 
 from pydantic import BaseConfig, BaseModel, Field
+from pydantic.main import ModelMetaclass, BaseModel
+from pydantic.generics import GenericModel
 from pydantic.dataclasses import dataclass
+from requests import delete
 
 try:
     from ujson import dumps, loads
@@ -23,6 +27,8 @@ except ImportError:
         from json import dumps, loads
 
 _type = type
+_T = TypeVar("_T")
+_D = TypeVar("_D", bound=dict)
 
 __all__ = (
     "Entity",
@@ -38,21 +44,40 @@ __all__ = (
 Ent = TypeVar("Ent", bound="Entity")
 
 
+def default_uuid():
+    return UUID(str(uuid4()))
+
+
 def config_dumps(obj: Any) -> str:
     return ret if isinstance(ret := dumps(obj), str) else ret.decode()
 
 
+class Config(BaseConfig):
+    json_loads = loads
+    json_dumps = lambda *args, **kwargs: (
+        d if isinstance(d := dumps(*args, **kwargs), str) else d.decode()
+    )
+    smart_union = True
+    allow_mutations = True
+
+
 class HueConfig(BaseConfig):
-    underscore_attrs_are_private = True
     allow_population_by_field_name = True
     json_loads = loads
-    json_dumps = config_dumps
+    json_dumps = lambda *args, **kwargs: (
+        d if isinstance(d := dumps(*args, **kwargs), str) else d.decode()
+    )
     smart_union = True
+    allow_mutation = True
 
 
 class UUID(_UUID):
     def __json__(self):
         return self.__str__()
+
+
+def validate(*args, **kwargs):
+    return kwargs
 
 
 class Entity(BaseModel):
@@ -62,20 +87,49 @@ class Entity(BaseModel):
         default_factory=lambda: UUID("00000000-0000-0000-0000-000000000000")
     )
     type: ClassVar[str] = "unknown"
+    Config = HueConfig
+    __config__ = HueConfig
 
-    class Config:
-        __root__: "Entity"
-        json_loads = loads
-        json_dumps = dumps
-        smart_union = True
+    @classmethod
+    def cache_client(cls, client):
+        Entity.client = client
 
     @classmethod
     def get_entities(cls) -> dict[str, Type]:
         return cls.__cache__
 
     @classmethod
-    def __prepare__(cls, name, bases, **kwds):
-        return super().__prepare__(name, bases, **kwds)
+    def get_plural(cls, name):
+        if name.endswith("y"):
+            return name[:-1] + "ies"
+        return name + "s"
+
+    def __new__(cls, client=None, **kwargs):
+        clz = type(cls.__name__, (BaseModel,), {}).__new__(cls)
+        return clz
+
+    async def get(self):
+        return await getattr(self.client, f"get_{self.type}")(self.id)
+
+    async def create(self, **kwargs):
+        if not hasattr(self.client, f"create_{self.type}"):
+            return
+
+        for k, v in kwargs.items():
+            if hasattr(self, k) and getattr(self, k) != v:
+                setattr(self, k, v)
+
+        await getattr(self.client, f"create_{self.type}")(self)
+
+    async def update(self, **kwargs):
+        for k, v in kwargs.items():
+            if hasattr(self, k) and getattr(self, k) != v:
+                setattr(self, k, v)
+        await getattr(self.client, f"set_{self.type}")(self.id, self)
+
+    async def delete(self):
+        if _fn := getattr(self.client, f"delete_{self.type}", None):
+            await _fn(self.id, self)
 
     def __init_subclass__(cls, **_):
         super().__init_subclass__()
@@ -85,6 +139,14 @@ class Entity(BaseModel):
 
     def __hash__(self) -> int:
         return hash(self.id)
+
+
+class BaseAttribute(BaseModel):
+    Config = HueConfig
+    __config__ = HueConfig
+
+    def __init_subclass__(cls, *args, **kwargs):
+        cls.Config = HueConfig
 
 
 class RoomType(Enum):
@@ -194,8 +256,20 @@ class _XY:
     x: float
     y: float
 
+    def __post_init__(self):
+        if self.x < 0.01:
+            self.x = 0.01
+        if self.y < 0.01:
+            self.y = 0.01
+        if self.x > 0.99:
+            self.x = 0.99
+        if self.y > 0.99:
+            self.y = 0.99
+
     def __json__(self):
-        return '{"y":' + f'{self.x}, "x": {self.y}' + "}"
+        return (
+            '{"y":' + f'{int(10000*self.x)/10000}, "x": {int(10000*self.y)/10000}' + "}"
+        )
 
 
 @dataclass
@@ -210,7 +284,7 @@ XY = _XY | tuple[float, float]
 
 
 class Attributes:
-    class Action(BaseModel):
+    class Action(BaseAttribute):
         on: "Attributes.On" = Field(default_factory=lambda: Attributes.On(on=True))
         dimming: "Attributes.Dimming" = Field(
             default_factory=lambda: Attributes.Dimming(
@@ -233,7 +307,7 @@ class Attributes:
             default_factory=lambda: Attributes.SceneDynamics(duration=1)
         )
 
-    class Actions(BaseModel):
+    class Actions(BaseAttribute):
         target: "Attributes.Identifier" = Field(...)
         action: "Attributes.Action" = Field(default_factory=lambda: Attributes.Action())
         dimming: "Attributes.Dimming" = Field(
@@ -245,10 +319,10 @@ class Attributes:
             default_factory=lambda: Attributes.ColorPoint()
         )
 
-    class Alert(BaseModel):
+    class Alert(BaseAttribute):
         action: Literal["breathe", "unknown"] = "unknown"
 
-    class Button(BaseModel):
+    class Button(BaseAttribute):
         last_event: Literal[
             "initial_press",
             "repeat",
@@ -258,107 +332,94 @@ class Attributes:
             "long_press",
         ] = "initial_press"
 
-    class Color(BaseModel):
+    class Color(BaseAttribute):
         xy: "Attributes.XY" = Field(default_factory=lambda: Attributes.XY(x=0.0, y=0.0))
         gamut: "Attributes.Gamut" = Field(default_factory=lambda: Attributes.Gamut())
         gamut_type: Literal["A", "B", "C"] = "A"
 
-    class ColorPointColor(BaseModel):
+    class ColorPointColor(BaseAttribute):
         color: "Attributes.ColorPoint" = Field(
             default_factory=lambda: Attributes.ColorPoint()
         )
 
-    class ColorPoint(BaseModel):
+    class ColorPoint(BaseAttribute):
         xy: "Attributes.XY" = Field(default_factory=lambda: Attributes.XY(x=0.0, y=0.0))
 
-    class ColorMirekSchema(BaseModel):
+    class ColorMirekSchema(BaseAttribute):
         mirek_minimum: int = Field(default=153, ge=153, le=500)
         mirek_maximum: int = Field(default=500, ge=153, le=500)
 
-    class ColorTemp(BaseModel):
+    class ColorTemp(BaseAttribute):
         mirek: Optional[int] = Field(default=0, ge=153, le=500)
         mirek_valid: Optional[bool] = True
         mirek_schema: Optional["Attributes.ColorMirekSchema"] = Field(
             default_factory=lambda: Attributes.ColorMirekSchema()
         )
 
-    class Dependee(BaseModel):
+    class Dependee(BaseAttribute):
         type: str = "unknown"
         target: "Attributes.Identifier" = Field(...)
         level: str = "unknown"
 
-    class Dimming(BaseModel):
-        class Config:
-            frozen = True
-            allow_mutation = False
-            validate_assignment = True
-
+    class Dimming(BaseAttribute):
         brightness: Optional[float] = Field(default=100, gt=0, le=100)
         min_dim_level: Optional[float] = Field(default=0, ge=0, le=100)
 
-    class DimmingDelta(BaseModel):
+    class DimmingDelta(BaseAttribute):
         action: Optional[Literal["up", "down", "stop"]] = "stop"
         brightness_delta: Optional[float] = Field(default=0, ge=0, le=100)
 
-    class Dynamics(BaseModel):
+    class Dynamics(BaseAttribute):
         status: str = "unknown"
         status_values: Optional[list[str]] = Field(default_factory=list)
         speed: Optional[float] = Field(default=0.0, ge=0, le=100)
         speed_valid: Optional[bool] = True
 
-    class Effects(BaseModel):
+    class Effects(BaseAttribute):
         effect: Optional[list[str]] = Field(default_factory=list)
         status_values: Optional[list[str]] = Field(default_factory=list)
         status: str = "unknown"
         effect_values: Optional[list[str]] = Field(default_factory=list)
 
-    class EntChannel(BaseModel):
+    class EntChannel(BaseAttribute):
         channel_id: int = Field(ge=0, le=255)
         position: Optional["Attributes.XYZ"] = Field(
             default_factory=lambda: Attributes.XYZ(x=0.0, y=0.0, z=0.0)
         )
         members: list["Attributes.SegmentRef"] = Field(default_factory=list)
 
-    class EntLocation(BaseModel):
+    class EntLocation(BaseAttribute):
         service_location: list["Attributes.ServiceLocation"] = Field(
             default_factory=list
         )
 
-    class Gamut(BaseModel):
+    class Gamut(BaseAttribute):
         red: XY = Field(default_factory=lambda: Attributes.XY(x=0.0, y=0.0))
         green: XY = Field(default_factory=lambda: Attributes.XY(x=0.0, y=0.0))
         blue: XY = Field(default_factory=lambda: Attributes.XY(x=0.0, y=0.0))
 
-    class Gradient(BaseModel):
+    class Gradient(BaseAttribute):
         points: Optional[list["Attributes.ColorPointColor"]] = Field(
             default_factory=list
         )
         points_capable: Optional[int] = Field(default=1, ge=0, le=255)
 
-    class Identifier(BaseModel):
-        class Config:
-            frozen = True
-            allow_mutation = False
-            validate_assignment = True
+    class Identifier(BaseAttribute):
 
-        rid: UUID = Field(default_factory=uuid4)
+        rid: UUID = Field(default_factory=default_uuid)
         rtype: str = "unknown"
 
-    class LightColor(BaseModel):
+    class LightColor(BaseAttribute):
         xy: Optional[XY] = Field(default_factory=lambda: _XY(x=0.0, y=0.0))
 
-    class LightLevelValue(BaseModel):
+    class LightLevelValue(BaseAttribute):
         light_level: Optional[int] = Field(default=0, ge=0, le=100000)
         light_level_valid: Optional[bool] = True
 
-    class LightEffect(BaseModel):
+    class LightEffect(BaseAttribute):
         effect: Optional[Literal["fire", "candle", "no_effect"]] = "no_effect"
 
-    class Metadata(BaseModel):
-        class Config:
-            frozen = True
-            allow_mutation = False
-            validate_assignment = True
+    class Metadata(BaseAttribute):
 
         name: str = "unknown"
         archetype: Archetype | RoomType = Archetype.UNKNOWN_ARCHETYPE
@@ -366,36 +427,30 @@ class Attributes:
             default_factory=lambda: Attributes.Identifier(), repr=False
         )
 
-    class Motion(BaseModel):
+    class Motion(BaseAttribute):
         motion: Optional[bool] = False
         motion_valid: Optional[bool] = True
 
-    class On(BaseModel):
-        class Config:
-            frozen = True
-            allow_mutation = False
-            validate_assignment = True
+    class On(BaseAttribute):
 
         on: Optional[bool] = Field(default=True, alias="on")
 
-    class Palette(BaseModel):
+    class Palette(BaseAttribute):
         color: Optional[list["Attributes.PaletteColor"]] = Field(default_factory=list)
         dimming: Optional[list["Attributes.Dimming"]] = Field(default_factory=list)
         color_temperature: list["Attributes.PaletteTemperature"] = Field(
             default_factory=list
         )
 
-    class PaletteColor(BaseModel):
+    class PaletteColor(BaseAttribute):
         color: Optional["Attributes.ColorPoint"] = Field(
             default_factory=lambda: Attributes.ColorPoint()
         )
         dimming: Optional["Attributes.Dimming"] = Field(
-            default_factory=lambda: Attributes.Dimming(
-                brightness=100.0, min_dim_level=100.0
-            )
+            default_factory=lambda: Attributes.Dimming(brightness=100.0)
         )
 
-    class PaletteTemperature(BaseModel):
+    class PaletteTemperature(BaseAttribute):
         color_temperature: Optional["Attributes.ScenePaletteColorTemp"] = Field(
             default_factory=lambda: Attributes.ScenePaletteColorTemp(mirek=500)
         )
@@ -405,25 +460,27 @@ class Attributes:
             )
         )
 
-    class PowerState(BaseModel):
+    class PowerState(BaseAttribute):
         battery_state: Optional[Literal["normal", "low", "critical"]] = "normal"
         battery_level: Optional[float] = Field(default=100.0, le=100.0, ge=0.0)
 
-    class ProductData(BaseModel):
+    class ProductData(BaseAttribute):
         model_id: Optional[str] = "unknown"
         manufacturer_name: Optional[str] = "unknown"
         product_name: Optional[str] = "unknown"
         product_archetype: Optional[Archetype] = Archetype.UNKNOWN_ARCHETYPE
         certified: Optional[bool] = False
-        software_version: Optional[str] = Field(default="0.0.0", regex=r"\d+\.\d+\.\d+")
+        software_version: Optional[str] = Field(
+            default="0.0.0", regex=r"\d+\.(?:\d+\.)*\d+"
+        )
         hardware_platform_type: Optional[str] = "unknown"
 
-    class RelativeRotary(BaseModel):
+    class RelativeRotary(BaseAttribute):
         last_event: Optional["Attributes.RotaryEvent"] = Field(
             default_factory=lambda: Attributes.RotaryEvent()
         )
 
-    class RotaryEvent(BaseModel):
+    class RotaryEvent(BaseAttribute):
         action: Optional[Literal["start", "repeat", "unknown"]] = "unknown"
         rotation: Optional["Attributes.RotaryRotation"] = Field(
             default_factory=lambda: Attributes.RotaryRotation(
@@ -431,36 +488,36 @@ class Attributes:
             )
         )
 
-    class RotaryRotation(BaseModel):
+    class RotaryRotation(BaseAttribute):
         direction: Literal["clock_wise", "counter_clock_wise"] = "clock_wise"
         duration: Optional[float] = Field(0.0, ge=0.0)
         steps: Optional[int] = Field(0, ge=0)
 
-    class SceneDynamics(BaseModel):
+    class SceneDynamics(BaseAttribute):
         duration: Optional[int] = Field(0, ge=0)
 
-    class SceneEffects(BaseModel):
+    class SceneEffects(BaseAttribute):
         effect: Optional[Literal["fire", "candle", "no_effect"]] = "no_effect"
 
-    class ScenePaletteColorTemp(BaseModel):
+    class ScenePaletteColorTemp(BaseAttribute):
         mirek: int = Field(153, ge=153, le=500)
 
-    class Segment(BaseModel):
+    class Segment(BaseAttribute):
         start: int = Field(0, ge=0)
         length: int = Field(1, ge=1)
 
-    class SegmentManager(BaseModel):
+    class SegmentManager(BaseAttribute):
         configurable: Optional[bool] = True
         max_segments: Optional[int] = Field(default=1, ge=1)
         segments: Optional[list["Attributes.Segment"]] = Field(default_factory=list)
 
-    class SegmentRef(BaseModel):
+    class SegmentRef(BaseAttribute):
         service: "Attributes.Identifier" = Field(
             default_factory=lambda: Attributes.Identifier()
         )
         index: int = 0
 
-    class ServiceLocation(BaseModel):
+    class ServiceLocation(BaseAttribute):
         service: "Attributes.Identifier" = Field(
             default_factory=lambda: Attributes.Identifier()
         )
@@ -469,33 +526,28 @@ class Attributes:
         )
         positions: list[Type["Attributes.XYZ"]] = Field(max_items=2, min_items=1)
 
-    class StreamProxy(BaseModel):
+    class StreamProxy(BaseAttribute):
         mode: Literal["auto", "manual"] = "manual"
         node: "Attributes.Identifier" = Field(
             default_factory=lambda: Attributes.Identifier()
         )
 
-    class Temp(BaseModel):
+    class Temp(BaseAttribute):
         temperature: float = Field(default=0.0, lt=100.0, gt=-100.0)
         temperature_valid: bool = True
 
-    class TimedEffects(BaseModel):
+    class TimedEffects(BaseAttribute):
         effect: Optional[str] = "none"
         duration: Optional[float] = Field(default=0.0, ge=0.0)
         status_values: Optional[list[str]] = Field(default_factory=list)
         status: Optional[str] = "unknown"
         effect_values: Optional[list[str]] = Field(default_factory=list)
 
-    class XY(BaseModel):
-        class Config:
-            frozen = True
-            allow_mutation = False
-            validate_assignment = True
-
+    class XY(BaseAttribute):
         x: float = Field(0.0, ge=0.0, le=1.0)
         y: float = Field(0.0, ge=0.0, le=1.0)
 
-    class XYZ(BaseModel):
+    class XYZ(BaseAttribute):
         x: float = Field(ge=-1.0, le=1.0)
         y: float = Field(ge=-1.0, le=1.0)
         z: float = Field(ge=-1.0, le=1.0)
@@ -545,11 +597,13 @@ class HueEntsV2:
         id: UUID
         id_v1: str = Field("", regex=r"^(\/[a-z]{4,32}\/[0-9a-zA-Z-]{1,32})?$")
         description: str = ""
-        configuration_schema: dict[str, Any] = Field(default_factory=dict)
-        trigger_schema: dict[str, Any] = Field(default_factory=dict)
-        state_schema: dict[str, Any] = Field(default_factory=dict)
+        configuration_schema: dict[Any, Any] = Field(default_factory=dict)
+        trigger_schema: dict[Any, Any] = Field(default_factory=dict)
+        state_schema: dict[Any, Any] = Field(default_factory=dict)
         version: str = Field("0.0.1", regex=r"^[0-9]+\.[0-9]+\.[0-9]+$")
-        metadata: dict[str, str] = Field(default_factory=dict)
+        metadata: dict[Any, Any] = Field(default_factory=dict)
+        supported_features: list[str] = Field(default_factory=list)
+        max_number_of_instances: int = Field(default=0, ge=0, le=255)
 
     class Bridge(Entity):
         type: ClassVar[str] = "bridge"
@@ -716,13 +770,17 @@ class HueEntsV2:
 
     class Room(Entity):
         type: ClassVar[str] = "room"
-        id: UUID
-        id_v1: str = Field("", regex=r"^(\/[a-z]{4,32}\/[0-9a-zA-Z-]{1,32})?$")
-        services: list[Attributes.Identifier] = Field(
+        id: Optional[UUID]
+        id_v1: Optional[str] = Field(
+            "", regex=r"^(\/[a-z]{4,32}\/[0-9a-zA-Z-]{1,32})?$"
+        )
+        services: Optional[list[Attributes.Identifier]] = Field(
             default_factory=list, alias="service"
         )
-        metadata: Attributes.Metadata = Field(default_factory=Attributes.Metadata)
-        children: list[Attributes.Identifier] = Field(default_factory=list)
+        metadata: Optional[Attributes.Metadata] = Field(
+            default_factory=Attributes.Metadata
+        )
+        children: Optional[list[Attributes.Identifier]] = Field(default_factory=list)
 
     class Scene(Entity):
         id: UUID

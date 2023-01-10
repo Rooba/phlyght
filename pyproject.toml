@@ -29,8 +29,8 @@ pydantic = ">=1.10.0"
 yarl = ">=1.8.0"
 ujson = ">=5.6.0"
 rich = ">=12.6.0"
-orjson = "^3.8.3"
-uvloop = "^0.17.0"
+aiofiles = ">=22.1.0"
+pyyaml = "^6.0"
 
 [tool.poetry.dev-dependencies]
 black = ">=22.10.0"
@@ -39,6 +39,13 @@ black = ">=22.10.0"
 pycodestyle = "^2.10.0"
 pylint = "^2.15.7"
 mypy = "^0.991"
+
+[tool.poetry.group.linux.dependencies]
+uvloop = "^0.17.0"
+
+[tool.poetry.group.linux]
+optional = true
+
 
 [build-system]
 requires = ["setuptools >= 39.2.0", "wheel", "poetry-core>=1.0.0"]
