@@ -2,9 +2,22 @@
 api_key:
 bridge_ip: 192.168.1.1
 aliases:
+  light_levels:
+    38b5b9f0-f754-4e70-8609-d40e52ef8f12: yd_parking_lumens
+    9ea4f33d-0da1-4bc5-9b01-98396a3b7677: ktch_lumens
+    ef343aaf-0e77-4563-b8ec-bd0662990ceb: yd_fenced_lumens
   lights:
-    00000000-0000-0000-0000-000000000000: entry
-    11111111-1111-1111-1111-111111111111: bed
-    22222222-2222-2222-2222-222222222222: kitchen
-    33333333-3333-3333-3333-333333333333: bathroom
-    44444444-4444-4444-4444-444444444444: footrest
+    3c9d5ba7-ea43-45f8-a823-f3b32168776d: r_desk
+    46588240-8205-4615-a2b5-27a8ecf9715f: p_strip
+    930437b3-a0ef-4ade-be50-7cce032b9d0b: g_doors
+    93a1533e-bfeb-4103-a150-180943a3ff3b: r_curtain
+  motions:
+    3cf4bc43-3c73-43c9-ba03-d9b6af84785b: yd_fenced_motion
+    59e03887-fd24-42eb-b7f0-f5b88eb20291: ktch_motion
+  rooms:
+    3cecbcff-a654-48c4-a699-84882b087c17: porch
+    448afef5-cccb-49d3-ab27-aa8e4c6e7dd4: toilet
+  temperatures:
+    357431ce-7470-4722-8f48-4c45546dd53b: yd_parking_temp
+    62762858-1c26-436e-a4fd-1f97382dc0a7: ktch_temp
+    96d545e0-bf61-4d4d-9ada-f5e8fb7d75e5: yd_fenced_temp

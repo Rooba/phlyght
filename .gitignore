@@ -1,6 +1,6 @@
 **/.vscode
 **/.mypy_cache
-**/config.yaml
+**/config*.yaml
 **/.venv
 **/poetry.lock
 **/__pycache__
@@ -8,4 +8,5 @@
 **/build
 **/*.egg-info
 
-test2.py
+test*
+**/.wsl_venv

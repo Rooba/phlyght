@@ -1,5 +1,6 @@
-from typing import Any
+from typing import Any, Optional, Self
 from httpx import AsyncClient
+from yaml import YAMLObject
 
 from .utils import ENDPOINT_METHOD
 
@@ -58,9 +59,9 @@ class SubRouter(metaclass=RouterMeta):
     BASE_URI: str
     _api_path: str
     _client: AsyncClient
-    _bridge_ip: str
+    _bridge_host: str
 
-    def __new__(cls, hue_api_key: str):
+    def __new__(cls, **kwargs):
         if not hasattr(cls, "handlers"):
             cls.handlers: dict[str, type] = {}
 
@@ -70,11 +71,11 @@ class SubRouter(metaclass=RouterMeta):
 
         return super().__new__(cls)
 
-    def __init__(self, hue_api_key: str):
-        self._hue_api_key = hue_api_key
+    def __init__(self, api_key: str, /):
+        self._api_key = api_key
         self._headers = {
             "User-Agent": "Python/HueClient",
-            "hue-application-key": self._hue_api_key,
+            "hue-application-key": self._api_key,
         }
 
     def __init_subclass__(cls, *_, **kwargs) -> None:
@@ -84,3 +85,59 @@ class SubRouter(metaclass=RouterMeta):
 
     def __getattribute__(self, key) -> Any:
         return object.__getattribute__(self, key)
+
+
+class YAMLConfig(YAMLObject, dict):
+    yaml_tag = "!YAMLConfig"
+
+    def __setstate__(self, state):
+        for k, v in state.items():
+            if isinstance(v, dict):
+                v = YAMLConfig(**v)
+
+            setattr(self, k, v)
+            dict.__setitem__(self, k, v)
+            self.__dict__[k] = v
+
+        return self
+
+    def __setitem__(self, key, value):
+        if isinstance(value, dict):
+            value = YAMLConfig(**value)
+
+        dict.__setitem__(self, key, value)
+        setattr(self, key, value)
+        self.__dict__[key] = value
+
+    def __getattribute__(self, name):
+        return object.__getattribute__(self, name)
+
+    def __getitem__(self, key):
+        return dict.__getitem__(self, key)
+
+    def keys(self):
+        return dict.keys(self)
+
+    def __iter__(self):
+        return dict.__iter__(self)
+
+    def __get__(self, key, f=None) -> Self | Any | None:
+        if f:
+            return self
+        return getattr(self, key, None)
+
+    def __init__(self, **data):
+        super().__init__()
+        for k, v in data.items():
+            self.__dict__[k] = v
+            self.__setattr__(k, v)
+            dict.__setitem__(self, k, v)
+
+    def items(self):
+        return dict.items(self)
+
+    def __repr__(self):
+        return dict.__repr__(self)
+
+    def __str__(self):
+        return dict.__str__(self)

@@ -18,7 +18,7 @@ include = ["phlyght"]
 
 [tool.poetry]
 name = "lights"
-version = "1.0.0"
+version = "1.0.1"
 description = "An async Python library for controlling Philips Hue lights."
 authors = ["Ra <ra@tcp.direct>"]
 
@@ -31,6 +31,8 @@ ujson = ">=5.6.0"
 rich = ">=12.6.0"
 aiofiles = ">=22.1.0"
 pyyaml = "^6.0"
+loguru = "^0.6.0"
+orjson = "^3.8.5"
 
 [tool.poetry.dev-dependencies]
 black = ">=22.10.0"
@@ -39,6 +41,7 @@ black = ">=22.10.0"
 pycodestyle = "^2.10.0"
 pylint = "^2.15.7"
 mypy = "^0.991"
+flake8 = "^6.0.0"
 
 [tool.poetry.group.linux.dependencies]
 uvloop = "^0.17.0"
@@ -54,3 +57,11 @@ build-backend = "setuptools.build_meta"
 [tool.flake8]
 ignore = ["W503"]
 extras = ["E501", "E203"]
+
+[tool.pyright]
+pythonVersion = "3.11.1"
+pythonPlatform = "Linux"
+include = [ "*.py" ]
+ignore = ["reportGeneralTypeIssues"]
+reportMissingImports = true
+reportMissingTypeStubs = false

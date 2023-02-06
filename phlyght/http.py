@@ -1,21 +1,20 @@
 from abc import abstractmethod
 from asyncio import gather, get_running_loop, new_event_loop, sleep
 import collections
-from inspect import signature, Parameter
-from io import BytesIO, StringIO
-from os import PathLike
+from io import StringIO
 from pathlib import Path
-from typing import Any, Literal, Optional, TypeVar, Generic
+from re import compile as re_compile
+from typing import Any, Iterable, Literal, Optional, TypeVar, Generic
 
 from aiofiles import open as aio_open
 from httpx import AsyncClient, ConnectError, ConnectTimeout, _content
 from httpx._exceptions import ReadTimeout as HTTPxReadTimeout
 from httpcore._exceptions import ReadTimeout
-from numpy import sort
-from pydantic import BaseModel, Field
+from pydantic import BaseConfig, BaseModel, Field
+from rich import print
 
 from pydantic.generics import GenericModel
-from yaml import Loader, load, Dumper, dump as yaml_dump
+from yaml import Loader, load, dump as yaml_dump
 
 from .abc import SubRouter
 
@@ -23,9 +22,7 @@ from .utils import (
     IP_RE,
     LRU,
     MSG_RE_BYTES,
-    STR_FMT_RE,
     URL,
-    URL_TYPES,
     get_data_fields,
     get_url_args,
     ret_cls,
@@ -35,12 +32,11 @@ from . import models
 from .models import HueEntsV2, Entity, UUID
 
 
-try:
-    from ujson import dumps, loads, JSONDecodeError
-except ImportError:
-    from json import dumps, loads, JSONDecodeError
+from ujson import dumps, loads
 
 setattr(_content, "json_dumps", dumps)
+
+UUID_CMP = re_compile(r"^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$")
 
 try:
     from yarl import URL as UR
@@ -113,9 +109,9 @@ def route(method, endpoint) -> Any:
                     if _v := d.pop(k, None):
                         url_args[k] = v(_v)
 
-            _match_bridge = IP_RE.search(self._bridge_ip)
+            _match_bridge = IP_RE.search(self._bridge_host)
             if not _match_bridge:
-                raise ValueError(f"Invalid bridge ip {self._bridge_ip}")
+                raise ValueError(f"Invalid bridge ip {self._bridge_host}")
 
             _url_base = f"https://{_match_bridge.group(1)}/" + f"{base_uri}".lstrip("/")
             if url_args:
@@ -262,7 +258,7 @@ class HueAPIv2(SubRouter):
 
     @ret_cls(HueEntsV2.Device)
     @route("GET", "/resource/device")
-    async def get_devices(self, /):
+    async def get_devices(self, /) -> Iterable[HueEntsV2.Device]:
         ...
 
     @ret_cls(HueEntsV2.Device)
@@ -324,9 +320,7 @@ class HueAPIv2(SubRouter):
         "GET", "/resource/entertainment_configuration/{entertainment_configuration_id}"
     )
     async def get_entertainment_configuration(
-        self,
-        entertainment_configuration_id: UUID,
-        /,
+        self, entertainment_configuration_id: UUID, /
     ):
         ...
 
@@ -345,9 +339,7 @@ class HueAPIv2(SubRouter):
         "/resource/entertainment_configuration/{entertainment_configuration_id}",
     )
     async def delete_entertainment_configuration(
-        self,
-        entertainment_configuration_id: UUID,
-        /,
+        self, entertainment_configuration_id: UUID, /
     ):
         ...
 
@@ -657,12 +649,12 @@ class HueAPIv2(SubRouter):
     async def set_zigbee_connectivity(self, zigbee_connectivity_id: UUID, /, **kwargs):
         ...
 
-    # @ret_cls(HueEntsV2.ZigbeeDeviceDiscovery)
+    @ret_cls(HueEntsV2.ZigbeeDeviceDiscovery)
     @route("GET", "/resource/zigbee_device_discovery")
     async def get_zigbee_device_discoveries(self, /):
         ...
 
-    # @ret_cls(HueEntsV2.ZigbeeDeviceDiscovery)
+    @ret_cls(HueEntsV2.ZigbeeDeviceDiscovery)
     @route("GET", " /resource/zigbee_device_discovery/{zigbee_device_discovery_id}")
     async def get_zigbee_device_discovery(self, zigbee_device_discovery_id: UUID, /):
         ...
@@ -815,6 +807,11 @@ class HueAPIv2(SubRouter):
 
 class Router(HueAPIv2, HueEDK):
     class Aliases(BaseModel):
+        class Config(BaseConfig):
+            smart_union = True
+            use_enum_values = True
+            allow_population_by_field_name = True
+
         behavior_instances: Optional[dict[str, HueEntsV2.BehaviorInstance]] = Field(
             default_factory=dict
         )
@@ -826,6 +823,9 @@ class Router(HueAPIv2, HueEDK):
             default_factory=dict
         )
         buttons: Optional[dict[str, HueEntsV2.Button]] = Field(default_factory=dict)
+        device_powers: Optional[dict[str, HueEntsV2.DevicePower]] = Field(
+            default_factory=dict
+        )
         entertainments: Optional[dict[str, HueEntsV2.Entertainment]] = Field(
             default_factory=dict
         )
@@ -854,44 +854,71 @@ class Router(HueAPIv2, HueEDK):
         zigbee_connectivities: Optional[
             dict[str, HueEntsV2.ZigbeeConnectivity]
         ] = Field(default_factory=dict)
+        zigbee_device_discoveries: Optional[
+            dict[str, HueEntsV2.ZigbeeDeviceDiscovery]
+        ] = Field(default_factory=dict)
         zgb_connectivities: Optional[dict[str, HueEntsV2.ZigbeeConnectivity]] = Field(
             default_factory=dict
         )
         zones: Optional[dict[str, HueEntsV2.Zone]] = Field(default_factory=dict)
 
+        def items(self):
+            return ((k, getattr(self, k)) for k in self.__fields__.keys())
+
+        def keys(self):
+            return self.__fields__.keys()
+
+        def __setitem__(self, key, value):
+            self.__setattr__(key, value)
+
+        def __getitem__(self, key, default=None):
+            return self.__getattribute__(key)
+
         def __json__(self):
             return dumps(dict(self), indent=4)
 
-    def __new__(cls, hue_api_key: str, bridge_ip: str = "", max_cache_size: int = 10):
-        cls = super().__new__(cls, hue_api_key)
+        # def get_entity(self, id: UUID | str):
+
+    def __new__(cls, max_cache_size: int = 10, **kwargs):
+        cls = super().__new__(cls, **kwargs)
         return cls
 
-    def __init__(
-        self,
-        hue_api_key: Optional[str] = None,
-        bridge_ip: Optional[str] = None,
-        max_cache_size=10,
-    ):
-        with open("config.yaml", "r+") as f:
-            self.config = load(f, Loader=Loader)
-        if not hue_api_key and not self.config.api_key:
-            print(
-                "No API key provided, please fill out your hue API key in the config or Router.__init__"
+    def __init__(self, max_cache_size=10, **kwargs):
+        from .abc import YAMLConfig
+
+        _config = Path("config_test.yaml")
+        if not _config.exists():
+            _config.touch()
+            self.config = YAMLConfig(
+                api_key=kwargs.get("api_key", None),
+                bridge_host=kwargs.get("bridge_host", None),
+                aliases={},
             )
-            exit(1)
-        super().__init__(hue_api_key or self.config.api_key)
+            with _config.open("w+") as f:
+                yaml_dump(self.config, f, default_flow_style=False)
+            if not self.config.api_key:
+                print("Please fill out config.yaml with the api_key and bridge_host")
+                exit(1)
+        else:
+            with _config.open("r+") as f:
+                self.config = load(f, Loader=Loader)
+        super().__init__(kwargs.pop("api_key", None) or self.config.api_key or exit(1))
         Entity.cache_client(self)
         self.cache = LRU(max_cache_size)
         self._client = AsyncClient(headers=self._headers, verify=False)
         self._subscription = None
-        self._bridge_ip = bridge_ip or self.config.bridge_ip
+        self._bridge_host = f"""https://{(
+            kwargs.pop("bridge_host", None) or self.config.bridge_host or exit(1)
+        )}"""
         self._tasks = []
+        self._entities = self.Aliases()
 
         self.behavior_instances = {}
         self.behavior_scripts = {}
         self.bridges = {}
         self.bridge_homes = {}
         self.buttons = {}
+        self.device_powers = {}
         self.entertainments = {}
         self.entertainment_configurations = {}
         self.geofence_clients = {}
@@ -904,6 +931,7 @@ class Router(HueAPIv2, HueEDK):
         self.scenes = {}
         self.temperatures = {}
         self.zigbee_connectivities = {}
+        self.zigbee_device_discoveries = {}
         self.zgb_connectivities = {}
         self.zones = {}
 
@@ -940,8 +968,46 @@ class Router(HueAPIv2, HueEDK):
                     alias = v.get(str(obj.id))
                     if alias:
                         ob = obj.__class__(id=obj.id)
+                        self._entities[k][alias] = ob
                         getattr(self, k)[alias] = ob
                         setattr(self, alias, ob)
+                    else:
+                        self._entities[k][obj.metadata.name] = await obj.get()
+
+            cts = collections.Counter()
+            dn = {"devices"}
+            for device in await self.get_devices():
+                for service in device.services:
+                    pl = Entity.get_plural(service.rtype)
+                    dn.add(pl)
+                    if str(service.rid) in self.config["aliases"].get(pl, {}).keys():
+                        continue
+                    cts[service.rtype] += 1
+                    dvc = await getattr(self, f"get_{service.rtype}")(service.rid)
+                    if dvc:
+                        self._entities[pl][
+                            f"{TYPE_CACHE[service.rtype].cfg_prefix}_{cts[service.rtype]}"
+                        ] = dvc[0]
+                for k, v in self._entities.items():
+                    if k not in dn:
+                        dn.add(k)
+                        for itm in await getattr(self, f"get_{k}")():
+                            if str(itm.id) in self.config["aliases"].get(k, {}).keys():
+                                continue
+                            if hasattr(itm, "metadata"):
+                                nm = (
+                                    (
+                                        itm.metadata["name"]
+                                        if isinstance(itm.metadata, dict)
+                                        else itm.metadata.name
+                                    )
+                                    .replace(" ", "_")
+                                    .replace("-", "_")
+                                    .lower()
+                                )
+                                self._entities[k][nm] = itm
+                            else:
+                                self._entities[k][itm.id] = itm
 
             self.new_task(self._subscribe())
 
@@ -949,6 +1015,10 @@ class Router(HueAPIv2, HueEDK):
                 await sleep(60)
         except KeyboardInterrupt:
             await gather(*self._tasks)
+
+    async def dump_state(self):
+        async with aio_open("state.json", "w+") as f:
+            await f.write(dumps(self._entities, indent=4, sort_keys=True))
 
     def _parse_payload(self, payload: bytes):
         _match = MSG_RE_BYTES.search(payload)
@@ -962,14 +1032,10 @@ class Router(HueAPIv2, HueEDK):
             for _ent in _event["data"]:
                 _event_id = _id.decode()
                 _event_type = _event["type"]
-                _object = TYPE_CACHE[_ent["type"]](**_ent)
-                event = Event(
-                    id=_event_id,
-                    object=_object,
-                    type=_event_type,
-                )
-
-                if hasattr(self, f"on_{event.object.type}_{event.type}"):
+                if hasattr(self, f"on_{_ent['type']}_{_event['type']}"):
+                    _object = TYPE_CACHE[_ent["type"]](**_ent)
+                    event = Event(id=_event_id, object=_object, type=_event_type)
+                    # if hasattr(self, f"on_{event.object.type}_{event.type}"):
                     _evs.append(
                         _t := get_running_loop().create_task(
                             getattr(self, f"on_{event.object.type}_{event.type}")(
@@ -980,20 +1046,25 @@ class Router(HueAPIv2, HueEDK):
 
         self.cache.extend(*_evs)
 
-    async def dump(self, filename: Optional[Path | PathLike] = None):
-        devices = await self.get_devices()
+    async def dump(self, filename: Optional[Path | str] = None):
         aliases = {}
-        for device in devices:
-            for service in device.services:
-                aliases.setdefault(Entity.get_plural(service.rtype), {})
-                aliases[Entity.get_plural(service.rtype)][
-                    str(service.rid)
-                ] = device.metadata.name
+        for key, sub_val in self._entities.items():
+            defa = 0
+            aliases.setdefault(key, {})
+            aliases[key] = {
+                k
+                if not (aliased := UUID_CMP.match(str(k)))
+                else (v.cfg_prefix + str(defa := (defa + 1))): (
+                    str(v.id if not aliased else v.id)
+                )
+                for k, v in sub_val.items()
+            }
+
         cfg = {
-            "bridge_ip": self.config["bridge_ip"],
-            "api_key": self.config["api_key"],
+            "bridge_ip": self.config.get("bridge_ip", ""),
+            "api_key": self.config.get("api_key", ""),
             "aliases": {
-                k[0]: {v: vk for v, vk in sorted(k[1].items(), key=lambda i: i[1])}
+                k[0]: {vk: v for v, vk in sorted(k[1].items(), key=lambda i: i[1])}
                 for k in sorted(aliases.items(), key=lambda k: k[0])
             },
         }
@@ -1004,11 +1075,15 @@ class Router(HueAPIv2, HueEDK):
             file_path = filename
         else:
             file_path = Path("dump.yaml")
-
         f = await aio_open(file_path, "w+")
         buf = StringIO()
         yaml_dump(
-            cfg, buf, default_flow_style=False, allow_unicode=True, sort_keys=False
+            cfg,
+            buf,
+            default_flow_style=False,
+            allow_unicode=True,
+            sort_keys=True,
+            canonical=False,
         )
         await f.write(buf.getvalue())
         await f.close()

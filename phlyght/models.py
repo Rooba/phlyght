@@ -1,22 +1,10 @@
-from types import new_class
-from typing import (
-    Any,
-    Literal,
-    Optional,
-    Type,
-    ClassVar,
-    TypeVar,
-)
+from typing import Any, Literal, Optional, Type, ClassVar, TypeVar
 from uuid import UUID as _UUID, uuid4
-from typing import TypeVar, Generic
 from enum import Enum, auto
-from httpx import AsyncClient
 
 from pydantic import BaseConfig, BaseModel, Field
-from pydantic.main import ModelMetaclass, BaseModel
-from pydantic.generics import GenericModel
 from pydantic.dataclasses import dataclass
-from requests import delete
+import ujson
 
 try:
     from ujson import dumps, loads
@@ -53,20 +41,19 @@ def config_dumps(obj: Any) -> str:
 
 
 class Config(BaseConfig):
-    json_loads = loads
-    json_dumps = lambda *args, **kwargs: (
-        d if isinstance(d := dumps(*args, **kwargs), str) else d.decode()
-    )
+    json_loads = ujson.loads
+    # json_dumps = lambda *args, **kwargs: (
+    #     d if isinstance(d := dumps(*args, **kwargs), str) else d.decode()
+    # )
+    json_dumps = ujson.dumps
     smart_union = True
     allow_mutations = True
 
 
 class HueConfig(BaseConfig):
     allow_population_by_field_name = True
-    json_loads = loads
-    json_dumps = lambda *args, **kwargs: (
-        d if isinstance(d := dumps(*args, **kwargs), str) else d.decode()
-    )
+    json_loads = ujson.loads
+    json_dumps = ujson.dumps
     smart_union = True
     allow_mutation = True
 
@@ -140,6 +127,9 @@ class Entity(BaseModel):
     def __hash__(self) -> int:
         return hash(self.id)
 
+    def __json__(self):
+        return ujson.dumps(self)
+
 
 class BaseAttribute(BaseModel):
     Config = HueConfig
@@ -147,6 +137,7 @@ class BaseAttribute(BaseModel):
 
     def __init_subclass__(cls, *args, **kwargs):
         cls.Config = HueConfig
+        cls.__config__ = HueConfig
 
 
 class RoomType(Enum):
@@ -196,7 +187,7 @@ class RoomType(Enum):
     OTHER = auto()
 
     def __json__(self):
-        return self.value
+        return f'"{self.value}"'
 
 
 class Archetype(Enum):
@@ -362,8 +353,8 @@ class Attributes:
         level: str = "unknown"
 
     class Dimming(BaseAttribute):
-        brightness: Optional[float] = Field(default=100, gt=0, le=100)
-        min_dim_level: Optional[float] = Field(default=0, ge=0, le=100)
+        brightness: Optional[float] = Field(default=99.0, gt=0, le=100.0)
+        min_dim_level: Optional[float] = Field(default=1.0, ge=0, le=100.0)
 
     class DimmingDelta(BaseAttribute):
         action: Optional[Literal["up", "down", "stop"]] = "stop"
@@ -428,11 +419,10 @@ class Attributes:
         )
 
     class Motion(BaseAttribute):
-        motion: Optional[bool] = False
-        motion_valid: Optional[bool] = True
+        motion: Optional[bool] = Field(default=False)
+        motion_valid: Optional[bool] = Field(default=True)
 
     class On(BaseAttribute):
-
         on: Optional[bool] = Field(default=True, alias="on")
 
     class Palette(BaseAttribute):
@@ -447,7 +437,7 @@ class Attributes:
             default_factory=lambda: Attributes.ColorPoint()
         )
         dimming: Optional["Attributes.Dimming"] = Field(
-            default_factory=lambda: Attributes.Dimming(brightness=100.0)
+            default_factory=lambda: Attributes.Dimming(brightness=99.0)
         )
 
     class PaletteTemperature(BaseAttribute):
@@ -591,6 +581,7 @@ class HueEntsV2:
         last_error: str = "none"
         metadata: dict[Literal["name"], str] = Field(default_factory=dict)
         migrated_from: str = "unknown"
+        cfg_prefix: ClassVar[str] = "bhv_inst_"
 
     class BehaviorScript(Entity):
         type: ClassVar[str] = "behavior_script"
@@ -604,6 +595,7 @@ class HueEntsV2:
         metadata: dict[Any, Any] = Field(default_factory=dict)
         supported_features: list[str] = Field(default_factory=list)
         max_number_of_instances: int = Field(default=0, ge=0, le=255)
+        cfg_prefix: ClassVar[str] = "bhv_script_"
 
     class Bridge(Entity):
         type: ClassVar[str] = "bridge"
@@ -611,6 +603,7 @@ class HueEntsV2:
         id_v1: str = Field("", regex=r"^(\/[a-z]{4,32}\/[0-9a-zA-Z-]{1,32})?$")
         bridge_id: str = ""
         time_zone: dict[str, str] = Field(default_factory=dict)
+        cfg_prefix: ClassVar[str] = "brdg_"
 
     class BridgeHome(Entity):
         type: ClassVar[str] = "bridge_home"
@@ -618,6 +611,7 @@ class HueEntsV2:
         id_v1: str = Field("", regex=r"^(\/[a-z]{4,32}\/[0-9a-zA-Z-]{1,32})?$")
         services: list[Attributes.Identifier] = Field(default_factory=list)
         children: list[Attributes.Identifier] = Field(default_factory=list)
+        cfg_prefix: ClassVar[str] = "brdg_hm_"
 
     class Button(Entity):
         type: ClassVar[str] = "button"
@@ -626,6 +620,7 @@ class HueEntsV2:
         owner: Attributes.Identifier = Field(default_factory=Attributes.Identifier)
         metadata: dict[Literal["control_id"], int] = Field(default_factory=dict)
         button: Attributes.Button = Field(default_factory=Attributes.Button)
+        cfg_prefix: ClassVar[str] = "btn_"
 
     class Device(Entity):
         type: ClassVar[str] = "device"
@@ -636,6 +631,7 @@ class HueEntsV2:
         product_data: Attributes.ProductData = Field(
             default_factory=lambda: Attributes.ProductData()
         )
+        cfg_prefix: ClassVar[str] = "dvc_"
 
     class DevicePower(Entity):
         type: ClassVar[str] = "device_power"
@@ -645,6 +641,7 @@ class HueEntsV2:
         power_state: Attributes.PowerState = Field(
             default_factory=Attributes.PowerState
         )
+        cfg_prefix: ClassVar[str] = "dvc_pwr_"
 
     class Entertainment(Entity):
         type: ClassVar[str] = "entertainment"
@@ -657,6 +654,7 @@ class HueEntsV2:
         segments: Attributes.SegmentManager = Field(
             default_factory=Attributes.SegmentManager
         )
+        cfg_prefix: ClassVar[str] = "ent_"
 
     class EntertainmentConfiguration(Entity):
         type: ClassVar[str] = "entertainment_configuration"
@@ -679,18 +677,22 @@ class HueEntsV2:
             default_factory=Attributes.EntLocation
         )
         light_services: list[Attributes.Identifier] = Field(default_factory=list)
+        cfg_prefix: ClassVar[str] = "ent_cfg_"
 
     class GeofenceClient(Entity):
         type: ClassVar[str] = "geofence_client"
         id: UUID
         id_v1: str = Field("", regex=r"^(\/[a-z]{4,32}\/[0-9a-zA-Z-]{1,32})?$")
         name: str = ""
+        is_at_home: Optional[bool] = True
+        cfg_prefix: ClassVar[str] = "geo_clnt_"
 
     class Geolocation(Entity):
         type: ClassVar[str] = "geolocation"
         id: UUID
         id_v1: str = Field("", regex=r"^(\/[a-z]{4,32}\/[0-9a-zA-Z-]{1,32})?$")
         is_configured: bool = False
+        cfg_prefix: ClassVar[str] = "geoloc_"
 
     class GroupedLight(Entity):
         type: ClassVar[str] = "grouped_light"
@@ -698,15 +700,18 @@ class HueEntsV2:
         id_v1: str = Field("", regex=r"^(\/[a-z]{4,32}\/[0-9a-zA-Z-]{1,32})?$")
         on: Attributes.On = Field(default_factory=Attributes.On)
         alert: Attributes.Alert = Field(default_factory=Attributes.Alert)
+        cfg_prefix: ClassVar[str] = "grp_lt_"
 
     class Homekit(Entity):
         id: UUID
         type: ClassVar[str] = "resource"
         id_v1: str = Field("", regex=r"^(\/[a-z]{4,32}\/[0-9a-zA-Z-]{1,32})?$")
         status: Literal["paired", "pairing", "unpaired"] = "unpaired"
+        cfg_prefix: ClassVar[str] = "hm_kt_"
 
     class Light(Entity):
-        # id: UUID
+        type: ClassVar[str] = "light"
+        id: UUID
         id_v1: Optional[str] = Field(
             default="", regex=r"^(\/[a-z]{4,32}\/[0-9a-zA-Z-]{1,32})?$", exclude=True
         )
@@ -734,7 +739,7 @@ class HueEntsV2:
         timed_effects: Attributes.TimedEffects = Field(
             default_factory=Attributes.TimedEffects
         )
-        type: ClassVar[str] = "light"
+        cfg_prefix: ClassVar[str] = "l_"
 
     class LightLevel(Entity):
         type: ClassVar[str] = "light_level"
@@ -745,6 +750,7 @@ class HueEntsV2:
         light: Attributes.LightLevelValue = Field(
             default_factory=Attributes.LightLevelValue
         )
+        cfg_prefix: ClassVar[str] = "l_lvl_"
 
     class Motion(Entity):
         type: ClassVar[str] = "motion"
@@ -753,6 +759,7 @@ class HueEntsV2:
         owner: Attributes.Identifier = Field(default_factory=Attributes.Identifier)
         enabled: bool = True
         motion: Attributes.Motion = Field(default_factory=Attributes.Motion)
+        cfg_prefix: ClassVar[str] = "mtn_"
 
     class RelativeRotary(Entity):
         id: UUID
@@ -762,11 +769,13 @@ class HueEntsV2:
         relative_rotary: Attributes.RelativeRotary = Field(
             default_factory=Attributes.RelativeRotary
         )
+        cfg_prefix: ClassVar[str] = "rel_rot_"
 
     class Resource(Entity):
         id: UUID
         type: ClassVar[str] = "device"
         id_v1: str = Field("", regex=r"^(\/[a-z]{4,32}\/[0-9a-zA-Z-]{1,32})?$")
+        cfg_prefix: ClassVar[str] = "res_"
 
     class Room(Entity):
         type: ClassVar[str] = "room"
@@ -781,6 +790,7 @@ class HueEntsV2:
             default_factory=Attributes.Metadata
         )
         children: Optional[list[Attributes.Identifier]] = Field(default_factory=list)
+        cfg_prefix: ClassVar[str] = "rm_"
 
     class Scene(Entity):
         id: UUID
@@ -792,6 +802,7 @@ class HueEntsV2:
         speed: float = 0.0
         auto_dynamic: bool = False
         type: ClassVar[str] = "scene"
+        cfg_prefix: ClassVar[str] = "scn_"
 
     class Temperature(Entity):
         type: ClassVar[str] = "temperature"
@@ -800,6 +811,7 @@ class HueEntsV2:
         owner: Attributes.Identifier = Field(default_factory=Attributes.Identifier)
         enabled: bool = True
         temperature: Attributes.Temp = Field(default_factory=Attributes.Temp)
+        cfg_prefix: ClassVar[str] = "tmp_"
 
     class ZGPConnectivity(Entity):
         type: ClassVar[str] = "zgp_connectivity"
@@ -815,12 +827,17 @@ class HueEntsV2:
             ]
         ] = "connected"
         source_id: str = ""
+        cfg_prefix: ClassVar[str] = "zgp_"
 
     class ZigbeeConnectivity(Entity):
         type: ClassVar[str] = "zigbee_connectivity"
-        id: UUID
-        id_v1: str = Field("", regex=r"^(\/[a-z]{4,32}\/[0-9a-zA-Z-]{1,32})?$")
-        owner: Attributes.Identifier = Field(default_factory=Attributes.Identifier)
+        id: Optional[UUID]
+        id_v1: Optional[str] = Field(
+            None, regex=r"^(\/[a-z]{4,32}\/[0-9a-zA-Z-]{1,32})?$"
+        )
+        owner: Optional[Attributes.Identifier] = Field(
+            default_factory=Attributes.Identifier
+        )
         status: Optional[
             Literal[
                 "connected",
@@ -829,7 +846,20 @@ class HueEntsV2:
                 "unidirectional_incoming",
             ]
         ] = "connected"
-        mac_address: str = Field("", regex=r"^(?:[0-9a-fA-F]{2}(?:-|:)?){6}$")
+        mac_address: Optional[str] = Field("", regex=r"^(?:[0-9a-fA-F]{2}:?){6}")
+        cfg_prefix: ClassVar[str] = "zig_conn_"
+
+    class ZigbeeDeviceDiscovery(Entity):
+        type: ClassVar[str] = "zigbee_device_discovery"
+        id: UUID
+        id_v1: Optional[str] = Field(
+            "", regex=r"^(\/[a-z]{4,32}\/[0-9a-zA-Z-]{1,32})?$"
+        )
+        owner: Optional[Attributes.Identifier] = Field(
+            default_factory=Attributes.Identifier
+        )
+        status: Optional[Literal["active", "ready"]] = "ready"
+        cfg_prefix: ClassVar[str] = "zig_dev_"
 
     class Zone(Entity):
         type: ClassVar[str] = "zone"
@@ -840,6 +870,7 @@ class HueEntsV2:
         )
         metadata: Attributes.Metadata = Field(default_factory=Attributes.Metadata)
         children: list[Attributes.Identifier] = Field(default_factory=list)
+        cfg_prefix: ClassVar[str] = "zn_"
 
 
 for k, v in HueEntsV2.__dict__.items():

@@ -40,7 +40,9 @@ __all__ = (
 ENDPOINT_METHOD = re_compile(r"^(?=((?:get|set|create|delete)\w+))\1")
 STR_FMT_RE = re_compile(r"(?=(\{([^:]+)(?::([^}]+))?\}))\1")
 URL_TYPES = {"str": str, "int": int}
-IP_RE = re_compile(r"(?=(?:(?<=[^0-9])|)((?:[0-9]{,3}\.){3}[0-9]{,3}))\1")
+IP_RE = re_compile(
+    r"(?=(?:(?<=[^0-9])|^)((?:[a-z0-9]+\.)*[a-z0-9]+\.[a-z]{2,}(?:[0-9]{2,5})?|(?:[0-9]{,3}\.){3}[0-9]{,3}))\1"
+)
 
 MSG_RE_BYTES = re_compile(
     rb"(?=((?P<hello>^: hi\n\n$)|^id:\s(?P<id>[0-9]+:\d*?)\ndata:(?P<data>[^$]+)\n\n))\1"
@@ -114,14 +116,18 @@ def ret_cls(cls):
                 )
 
                 kwargs.pop("base_uri", None)
-                ret = ret.get("data", [])
+                ret = ret.get("data", None)
                 _rets = []
+
+                if not ret:
+                    return []
 
                 if isinstance(ret, list):
                     for r in ret:
                         _rets.append(cls(**r))
                 else:
                     return cls(**ret)
+
                 return _rets
             except JSONDecodeError:
                 return []
